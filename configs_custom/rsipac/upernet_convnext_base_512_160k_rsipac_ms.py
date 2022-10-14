@@ -25,11 +25,11 @@ model = dict(
     ),
     decode_head=dict(
         in_channels=[128, 256, 512, 1024],
-        num_classes=17,
+        num_classes=18,
     ),
     auxiliary_head=dict(
         in_channels=512,
-        num_classes=17
+        num_classes=18
     ), 
 )
 
@@ -70,7 +70,7 @@ train_pipeline = [
     dict(type='LoadImageFromFileCustom'),
     dict(type='LoadAnnotationsCustom'),    #, reduce_zero_label=True
     # dict(type='ClassMixFDA', prob=0.5, small_class=[1, 2, 3, 4, 5, 6, 7, 8], amp_thred=0.006, file='/data_zs/output/rsipac/config/small_class_with_samples_512x512_fold0.json'),   #[1, 3, 4, 5, 6]
-    # dict(type='AlbumentationAug'),
+    dict(type='AlbumentationAug'),
     dict(type='LabelEncode'),
     dict(type='Resize', img_scale=crop_size, ratio_range=(0.5, 2.0)),
     dict(type='RandomCrop', crop_size=crop_size, cat_max_ratio=0.75),
@@ -84,8 +84,8 @@ train_pipeline = [
     dict(type='Collect', keys=['img', 'gt_semantic_seg'])
 ]
 # By default, models are trained on 8 GPUs with 2 images per GPU
-data=dict(samples_per_gpu=10,
-          workers_per_gpu=10,
+data=dict(samples_per_gpu=12,
+          workers_per_gpu=12,
           train=dict(pipeline=train_pipeline))
 
 runner = dict(type='IterBasedRunner', max_iters=80000)
@@ -107,6 +107,6 @@ checkpoint_config = dict(by_epoch=False, interval=10000)
 evaluation = dict(interval=10000, metric='FWIoU', save_best='FWIoU', greater_keys='FWIoU')
 # evaluation = dict(interval=10000, metric='mIoU', pre_eval=True)
 
-name = 'convnext_base_80k_ce'
+name = 'convnext_base_80k_b12_ce_augv2'
 
 

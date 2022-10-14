@@ -18,11 +18,11 @@ model = dict(
     ),
     decode_head=dict(
         in_channels=[96,192,384,768],
-        num_classes=9
+        num_classes=18
     ),
     auxiliary_head=dict(
         in_channels=384,
-        num_classes=9
+        num_classes=18
     ))
 
 # AdamW optimizer, no weight decay for position embedding & layer norm in backbone
@@ -38,21 +38,19 @@ lr_config = dict(_delete_=True, policy='poly',
                  warmup_ratio=1e-6,
                  power=1.0, min_lr=0.0, by_epoch=False)
 
-size = 512
 img_norm_cfg = dict(
     mean=[61.455, 64.868, 74.614], std=[32.379, 35.219, 42.206], to_rgb=False)  #True
 train_pipeline = [
     dict(type='LoadImageFromFileCustom'),
     dict(type='LoadAnnotationsCustom'),    #, reduce_zero_label=True
-    dict(type='ClassMixFDA', prob=0.4, small_class=[4, 2, 7, 8], amp_thred=0.006, file='/data_zs/output/rsipac/config/small_class_with_samples_512x512_fold0.json'),   #[1, 3, 4, 5, 6]
+    # dict(type='ClassMixFDA', prob=0.4, small_class=[4, 2, 7, 8], amp_thred=0.006, file='/data_zs/output/rsipac/config/small_class_with_samples_512x512_fold0.json'),   #[1, 3, 4, 5, 6]
     dict(type='AlbumentationAug'),
     dict(type='LabelEncode'),
-    dict(type='Resize', img_scale=(size, size), ratio_range=(0.5, 2.0)),
-    dict(type='RandomCrop', crop_size=(size, size), cat_max_ratio=0.75),
+    dict(type='Resize', img_scale=crop_size, ratio_range=(0.5, 2.0)),
+    dict(type='RandomCrop', crop_size=crop_size, cat_max_ratio=0.75),
     dict(type='RandomFlip', prob=0.5, direction='horizontal'),
     dict(type='RandomFlip', prob=0.5, direction='vertical'),
     dict(type='PhotoMetricDistortion'),
-    # dict(type='PhotoMetricDistortion'),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='Pad', size=crop_size, pad_val=0, seg_pad_val=255),
     dict(type='DefaultFormatBundle'),
@@ -65,7 +63,7 @@ data=dict(samples_per_gpu=10,
 
 runner = dict(type='IterBasedRunner', max_iters=80000)
 
-optimizer_config = dict(type='Fp16OptimizerHook', loss_scale='512.')
+optimizer_config = dict(type='Fp16OptimizerHook', loss_scale='dynamic')
 # fp16 placeholder
 fp16 = dict()
 checkpoint_config = dict(by_epoch=False, interval=10000, max_keep_ckpts=3)
@@ -82,4 +80,4 @@ evaluation = dict(interval=10000, metric='FWIoU', save_best='FWIoU', greater_key
 #     use_fp16=True,
 # )
 
-name = 'upernet_cswin_base_512_rsipac'
+name = 'cswin_base_b10_ce_augv2'

@@ -108,10 +108,10 @@ class CustomBaseDataset(Dataset):
         self.test_mode = test_mode
         self.ignore_index = ignore_index
         self.reduce_zero_label = reduce_zero_label
-        self.label_map = {0: 101, 1: 202, 2: 303, 3: 204, 4: 205,
-               5: 806, 6: 807, 7: 808, 8: 409, 9: 410,
-               10: 511, 11: 512, 12: 613, 13: 614, 14: 715,
-               15: 716, 16: 817} #{0: 0, 1: 100, 2: 200, 3: 300, 4: 400, 5: 500, 6: 600, 7: 700, 8: 800}  #{0: 100, 1: 200, 2: 300, 3: 400, 4: 500, 5: 600, 6: 700, 7: 800}
+        self.label_map = {0: 0, 1: 101, 2: 202, 3: 303, 4: 204, 5: 205,
+               6: 806, 7: 807, 8: 808, 9: 409, 10: 410,
+               11: 511, 12: 512, 13: 613, 14: 614, 15: 715,
+               16: 716, 17: 817} #{0: 0, 1: 100, 2: 200, 3: 300, 4: 400, 5: 500, 6: 600, 7: 700, 8: 800}  #{0: 100, 1: 200, 2: 300, 3: 400, 4: 500, 5: 600, 6: 700, 7: 800}
         self.custom_classes = True
         # self.CLASSES, self.PALETTE = self.get_classes_and_palette(
         #     classes, palette)

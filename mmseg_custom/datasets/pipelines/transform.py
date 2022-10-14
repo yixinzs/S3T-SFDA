@@ -6,6 +6,9 @@ import albumentations as A
 import cv2
 import json
 from osgeo import gdal
+import pandas as pd
+import random
+import os
 
 # @PIPELINES.register_module()
 class SETR_Resize(object):
@@ -507,7 +510,7 @@ class AlbumentationAug(object):
 
     def TrainAugmentation(self, p=1):
 
-        return A.Compose(self.simple_tranforms, p=p)
+        return A.Compose(self.tranforms_v2, p=p)
 
     def __call__(self, results):
 
@@ -556,6 +559,62 @@ class LabelEncode(object):
         return encode_mask
 
 
+@PIPELINES.register_module()
+class FDA(object):
+    def __init__(self,
+                 prob,
+                 amp_thred=0.006,
+                 img_dir=None,
+                 file=None,
+                 ):
+        assert prob >= 0 and prob <= 1
+        self.prob = prob
+        self.amp_thred = amp_thred
+        self.img_dir = img_dir
+        self.file = file
+
+        df = pd.read_csv(file)
+        self.img_names = df['name']
+
+    def __call__(self, results):
+        fda_trans = True if np.random.rand() < self.prob else False
+
+        if fda_trans:
+            origin_img = results['img']
+
+            f1 = random.choice(self.img_names)
+            img_dirname = os.path.join(self.img_dir, f1)
+            target_image = self.readImage(img_dirname)
+
+            if np.sum(np.all(origin_img == [0, 0, 0], 2)) / (origin_img.shape[0] * origin_img.shape[1]) > 0.05:
+                # print('----------------------------------------:1')
+                return results
+            if np.sum(np.all(target_image == [0, 0, 0], 2)) / (target_image.shape[0] * target_image.shape[1]) > 0.05:
+                # print('----------------------------------------:2')
+                return results
+
+            aug = A.Compose([A.FDA([target_image], beta_limit=self.amp_thred, read_fn=lambda x: x, p=1)])
+            origin_img = aug(image=origin_img)['image']
+
+            results['img'] = origin_img
+
+        return results
+
+    def readImage(self, dirname):
+        if dirname.endswith('.png'):
+            image = cv2.imread(dirname, -1)
+        elif dirname.endswith('.tif'):
+            Img = gdal.Open(dirname)
+            image = Img.ReadAsArray(0, 0, Img.RasterXSize, Img.RasterYSize)
+            if len(image.shape) == 3:
+                image = np.rollaxis(image, 0, 3)
+        return image
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f'(img_dir={self.img_dir}, file={self.file})'
+        return repr_str
+
 
 @PIPELINES.register_module()
 class ClassMixFDA(object):
@@ -599,6 +658,14 @@ class ClassMixFDA(object):
                       (1 - stackedMask0) * origin_target)
         return data, target
 
+    def get_classLayout(self, class_value):
+        if class_value == 511:
+            return [511, 512, 613, 614]
+        elif class_value == 410:
+            return [410, 409]
+        elif class_value == 303:
+            return [303, 512]
+        
     def __call__(self, results):
         cut_mix = True if np.random.rand() < self.prob else False
 

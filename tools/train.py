@@ -30,15 +30,15 @@ from mmseg.utils import (collect_env, get_device, get_root_logger,
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a segmentor')
-    parser.add_argument('--config', default='/data_zs/code/rsipac/mmsegmentation_rsipac/configs_custom/rsipac/upernet_convnext_large_512_rsipac_ms.py', help='train config file path')
-    parser.add_argument('--work-dir', default='/data_zs/output/rsipac_semi/checkpoint/convnext_large_80k_Fp16Cumu2_ce_fold0', help='the dir to save logs and models')
+    parser.add_argument('--config', default='/data_zs/code/rsipac/mmsegmentation_rsipac/configs_custom/rsipac/upernet_cswin_base_512_rsipac.py', help='train config file path')
+    parser.add_argument('--work-dir', default='/data_zs/output/rsipac_semi/checkpoint/cswin_base_b10_ce_augv2', help='the dir to save logs and models')
     parser.add_argument(
         '--load-from', help='the checkpoint file to load weights from')
     parser.add_argument(
         '--resume-from', help='the checkpoint file to resume from')
     parser.add_argument(
         '--no-validate',
-        default=True,
+        default=False,
         # action='store_true',
         help='whether not to evaluate the checkpoint during training')
     group_gpus = parser.add_mutually_exclusive_group()
@@ -59,14 +59,15 @@ def parse_args():
         default=1,
         help='id of gpu to use '
         '(only applicable to non-distributed training)')
-    parser.add_argument('--seed', type=int, default=None, help='random seed')
+    parser.add_argument('--seed', type=int, default=42, help='random seed')  #None
     parser.add_argument(
         '--diff_seed',
         action='store_true',
         help='Whether or not set different seeds for different ranks')
     parser.add_argument(
         '--deterministic',
-        action='store_true',
+        default=True,
+        # action='store_true',
         help='whether to set deterministic options for CUDNN backend.')
     parser.add_argument(
         '--options',

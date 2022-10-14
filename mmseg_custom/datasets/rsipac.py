@@ -21,7 +21,7 @@ class RSIPACDataset(CustomBaseDataset):
     fixed to '_gtFine_labelTrainIds.png' for Cityscapes dataset.
     """
 
-    CLASSES = ('水体', '道路', '建筑物', '机场', '火车站',
+    CLASSES = ('背景', '水体', '道路', '建筑物', '机场', '火车站',
              '光伏', '停车场', '操场', '普通耕地', '农业大棚',
              '自然草地', '绿地绿化', '自然林', '人工林', '自然裸土',
              '人为裸土', '其它无法确定归属地物	')

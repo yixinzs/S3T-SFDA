@@ -48,7 +48,7 @@ model = dict(
     ),
     decode_head=dict(
         in_channels=[192, 384, 768, 1536],
-        num_classes=17,
+        num_classes=18,
         # loss_decode=[dict(type='LovaszLoss', per_image=False, reduction='none', loss_weight=1.0),
         #              dict(type='FocalLoss', loss_weight=1.0)],
         # loss_decode=[dict(type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.0),
@@ -58,7 +58,7 @@ model = dict(
     ),
     auxiliary_head=dict(
         in_channels=768,
-        num_classes=17,
+        num_classes=18,
         # loss_decode=[dict(type='LovaszLoss', per_image=False, reduction='none', loss_weight=0.4),
         #              dict(type='FocalLoss', loss_weight=0.4)],
         # loss_decode=[dict(type='CrossEntropyLoss', use_sigmoid=False, loss_weight=0.4),
