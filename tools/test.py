@@ -30,11 +30,11 @@ from mmseg.utils import build_ddp, build_dp, get_device, setup_multi_processes
 def parse_args():
     parser = argparse.ArgumentParser(
         description='mmseg test (and eval) a model')
-    parser.add_argument('--config', default='/data_zs/output/rsipac_semi/checkpoint/cswin_base_b10_ce_augv2/upernet_cswin_base_512_rsipac.py', help='test config file path')
-    parser.add_argument('--checkpoint', default='/data_zs/output/rsipac_semi/checkpoint/cswin_base_b10_ce_augv2/latest.pth', help='checkpoint file')
+    parser.add_argument('--config', default='/data_zs/output/rsipac_semi/checkpoint/convnext_base_80k_b12_ce_augv1/upernet_convnext_base_512_160k_rsipac_ms.py', help='test config file path')
+    parser.add_argument('--checkpoint', default='/data_zs/output/rsipac_semi/checkpoint/convnext_base_80k_b12_ce_augv1/latest.pth', help='checkpoint file')
     parser.add_argument(
         '--work-dir',
-        default='/data_zs/output/rsipac_semi/test/cswin_base_b10_ce_augv2',
+        default='/data_zs/output/rsipac_semi/test/convnext_base_80k_b12_ce_augv1',
         help=('if specified, the evaluation metric results will be dumped'
               'into the directory as json'))
     parser.add_argument(
@@ -57,7 +57,7 @@ def parse_args():
         ' for generic datasets, and "cityscapes" for Cityscapes')
     parser.add_argument('--show', action='store_true', help='show results')
     parser.add_argument(
-        '--show-dir', default='/data_zs/output/rsipac_semi/test/cswin_base_b10_ce_augv2', help='directory where painted images will be saved')
+        '--show-dir', default='/data_zs/output/rsipac_semi/test/convnext_base_80k_b12_ce_augv1', help='directory where painted images will be saved')
     parser.add_argument(
         '--gpu-collect',
         action='store_true',
@@ -65,7 +65,7 @@ def parse_args():
     parser.add_argument(
         '--gpu-id',
         type=int,
-        default=1,
+        default=0,
         help='id of gpu to use '
         '(only applicable to non-distributed testing)')
     parser.add_argument(

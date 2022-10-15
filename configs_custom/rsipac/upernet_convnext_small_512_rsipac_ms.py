@@ -13,22 +13,22 @@ _base_ = [
 crop_size = (512, 512)
 
 model = dict(
-    pretrained='/data_zs/data/pretrained_models/convnext_base_22k_224.pth',
+    pretrained='/data_zs/data/pretrained_models/convnext_small_22k_224.pth',
     backbone=dict(
         type='ConvNeXt',
         in_chans=3,
         depths=[3, 3, 27, 3], 
-        dims=[128, 256, 512, 1024], 
-        drop_path_rate=0.4,
+        dims=[96, 192, 384, 768], 
+        drop_path_rate=0.3,
         layer_scale_init_value=1.0,
         out_indices=[0, 1, 2, 3],
     ),
     decode_head=dict(
-        in_channels=[128, 256, 512, 1024],
+        in_channels=[96, 192, 384, 768],
         num_classes=18,
     ),
     auxiliary_head=dict(
-        in_channels=512,
+        in_channels=384,
         num_classes=18
     ), 
 )
@@ -52,17 +52,12 @@ optimizer = dict(
             head=dict(lr_mult=10.0)
             ))
 
+
 lr_config = dict(_delete_=True, policy='poly',
                  warmup='linear',
                  warmup_iters=1500,
                  warmup_ratio=1e-6,
                  power=1.0, min_lr=0.0, by_epoch=False)
-
-# lr_config = dict(_delete_=True, policy='CosineAnnealing',
-#                  warmup='linear',
-#                  warmup_iters=1500,
-#                  warmup_ratio=1e-6,
-#                  min_lr=0.0, by_epoch=False)
 
 img_norm_cfg = dict(
     mean=[61.455, 64.868, 74.614], std=[32.379, 35.219, 42.206], to_rgb=False)  #True
@@ -90,16 +85,6 @@ data=dict(samples_per_gpu=12,
 
 runner = dict(type='IterBasedRunner', max_iters=80000)
 
-# do not use mmdet version fp16
-# fp16 = None
-# optimizer_config = dict(
-#     type="DistOptimizerHook",
-#     update_interval=1,
-#     grad_clip=None,
-#     coalesce=True,
-#     bucket_size_mb=-1,
-#     use_fp16=True,
-# )
 optimizer_config = dict(type='Fp16OptimizerHook', loss_scale=512.)
 # fp16 placeholder
 fp16 = dict()
@@ -107,6 +92,4 @@ checkpoint_config = dict(by_epoch=False, interval=10000)
 evaluation = dict(interval=10000, metric='FWIoU', save_best='FWIoU', greater_keys='FWIoU')
 # evaluation = dict(interval=10000, metric='mIoU', pre_eval=True)
 
-name = 'convnext_base_80k_b12_ce_augv1'
-
-
+name = 'convnext_small_80k_b12_ce_augv2'
