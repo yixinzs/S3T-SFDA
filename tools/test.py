@@ -30,11 +30,11 @@ from mmseg.utils import build_ddp, build_dp, get_device, setup_multi_processes
 def parse_args():
     parser = argparse.ArgumentParser(
         description='mmseg test (and eval) a model')
-    parser.add_argument('--config', default='/data_zs/output/rsipac_semi/checkpoint/convnext_base_80k_b12_ce_augv1/upernet_convnext_base_512_160k_rsipac_ms.py', help='test config file path')
-    parser.add_argument('--checkpoint', default='/data_zs/output/rsipac_semi/checkpoint/convnext_base_80k_b12_ce_augv1/latest.pth', help='checkpoint file')
+    parser.add_argument('--config', default='/data_zs/output/rsipac_semi/checkpoint/convnext_tiny_80k_b12_ce_augv2-s1.5/upernet_convnext_tiny_rsipac_s1.5_ms_tmp.py', help='test config file path')
+    parser.add_argument('--checkpoint', default='/data_zs/output/rsipac_semi/checkpoint/convnext_tiny_80k_b12_ce_augv2-s1.5/latest.pth', help='checkpoint file')
     parser.add_argument(
         '--work-dir',
-        default='/data_zs/output/rsipac_semi/test/convnext_base_80k_b12_ce_augv1',
+        default='/data_zs/output/rsipac_semi/test/convnext_tiny_80k_b12_ce_augv2-s1.5_testaug1-1.75',
         help=('if specified, the evaluation metric results will be dumped'
               'into the directory as json'))
     parser.add_argument(
@@ -57,7 +57,7 @@ def parse_args():
         ' for generic datasets, and "cityscapes" for Cityscapes')
     parser.add_argument('--show', action='store_true', help='show results')
     parser.add_argument(
-        '--show-dir', default='/data_zs/output/rsipac_semi/test/convnext_base_80k_b12_ce_augv1', help='directory where painted images will be saved')
+        '--show-dir', default='/data_zs/output/rsipac_semi/test/convnext_tiny_80k_b12_ce_augv2-s1.5_testaug1-1.75', help='directory where painted images will be saved')
     parser.add_argument(
         '--gpu-collect',
         action='store_true',
@@ -153,7 +153,7 @@ def main():
     if args.aug_test:
         # hard code index
         cfg.data.test.pipeline[1].img_ratios = [
-            0.75, 1.0, 1.25, 1.5, 1.75  #0.5,
+            1.0, 1.25, 1.5, 1.75 #0.75, 1.0, 1.25, 1.5, 1.75  #0.5,
         ]
         cfg.data.test.pipeline[1].flip = True
         cfg.data.test.pipeline[1].flip_direction = ["horizontal", "vertical"]

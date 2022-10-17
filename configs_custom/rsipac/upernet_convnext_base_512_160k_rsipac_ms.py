@@ -103,7 +103,7 @@ runner = dict(type='IterBasedRunner', max_iters=80000)
 optimizer_config = dict(type='Fp16OptimizerHook', loss_scale=512.)
 # fp16 placeholder
 fp16 = dict()
-checkpoint_config = dict(by_epoch=False, interval=10000)
+checkpoint_config = dict(by_epoch=False, interval=10000, max_keep_ckpts=3)
 evaluation = dict(interval=10000, metric='FWIoU', save_best='FWIoU', greater_keys='FWIoU')
 # evaluation = dict(interval=10000, metric='mIoU', pre_eval=True)
 

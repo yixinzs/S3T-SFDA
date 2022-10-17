@@ -73,21 +73,44 @@ train_pipeline = [
     # dict(type='ClassMixFDA', prob=0.5, small_class=[1, 2, 3, 4, 5, 6, 7, 8], amp_thred=0.006, file='/data_zs/output/rsipac/config/small_class_with_samples_512x512_fold0.json'),   #[1, 3, 4, 5, 6]
     dict(type='AlbumentationAug'),
     dict(type='LabelEncode'),
-    dict(type='Resize', img_scale=crop_size, ratio_range=(0.5, 2.0)),
-    dict(type='RandomCrop', crop_size=crop_size, cat_max_ratio=0.75),
+    # dict(type='Resize', img_scale=crop_size, ratio_range=(0.5, 2.0)),
+    dict(type='RandomCrop', crop_size=(384, 384), cat_max_ratio=0.75),  #crop_size
+    dict(type='Resize', ratio_range=(1.25, 1.25)),
     dict(type='RandomFlip', prob=0.5, direction='horizontal'),
     dict(type='RandomFlip', prob=0.5, direction='vertical'),
     dict(type='PhotoMetricDistortion'),
     # dict(type='PhotoMetricDistortion'),
     dict(type='Normalize', **img_norm_cfg),
-    dict(type='Pad', size=crop_size, pad_val=0, seg_pad_val=255),
+    # dict(type='Pad', size=crop_size, pad_val=0, seg_pad_val=255),
     dict(type='DefaultFormatBundle'),
     dict(type='Collect', keys=['img', 'gt_semantic_seg'])
 ]
+
+test_pipeline = [
+    dict(type='LoadImageFromFileCustom'),
+    dict(
+        type='MultiScaleFlipAug',
+        # img_scale=(512, 512),
+        img_scale=None,
+        img_ratios=1.25,
+        # img_ratios=[0.5, 0.75, 1.0, 1.25, 1.5, 1.75],
+        flip=False,
+        transforms=[
+            dict(type='Resize', keep_ratio=True),
+            dict(type='ResizeToMultiple', size_divisor=32),
+            dict(type='RandomFlip'),
+            dict(type='Normalize', **img_norm_cfg),
+            dict(type='ImageToTensor', keys=['img']),
+            dict(type='Collect', keys=['img']),
+        ])
+]
+
 # By default, models are trained on 8 GPUs with 2 images per GPU
 data=dict(samples_per_gpu=12,
           workers_per_gpu=12,
-          train=dict(pipeline=train_pipeline))
+          train=dict(pipeline=train_pipeline),
+          val=dict(pipeline=test_pipeline),
+          test=dict(pipeline=test_pipeline))
 
 runner = dict(type='IterBasedRunner', max_iters=80000)
 
@@ -98,4 +121,4 @@ checkpoint_config = dict(by_epoch=False, interval=10000, max_keep_ckpts=3)
 evaluation = dict(interval=10000, metric='FWIoU', save_best='FWIoU', greater_keys='FWIoU')
 # evaluation = dict(interval=10000, metric='mIoU', pre_eval=True)
 
-name = 'convnext_small_80k_b12_Softce_augv2'
+name = 'convnext_small_80k_b12_Softce_augv2-s1.25'
