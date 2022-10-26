@@ -30,8 +30,8 @@ from mmseg.utils import (collect_env, get_device, get_root_logger,
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a segmentor')
-    parser.add_argument('--config', default='/data_zs/code/rsipac/mmsegmentation_rsipac/configs_custom/rsipac/upernet_convnext_small_512_rsipac_s1.5_ms.py', help='train config file path')
-    parser.add_argument('--work-dir', default='/data_zs/output/rsipac_semi/checkpoint/convnext_small_80k_b12_Softce_augv2-s1.25', help='the dir to save logs and models')
+    parser.add_argument('--config', default='/data_zs/code/rsipac/mmsegmentation_rsipac/configs_custom/rsipac/upernet_convnext_tiny_rsipac_s1.5_ms.py', help='train config file path')
+    parser.add_argument('--work-dir', default='/data_zs/output/rsipac_semi/checkpoint/convnext_tiny_80k_b12_poly_Softce_classfda_512s1.25_fold0', help='the dir to save logs and models')
     parser.add_argument(
         '--load-from', help='the checkpoint file to load weights from')
     parser.add_argument(

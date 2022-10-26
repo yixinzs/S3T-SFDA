@@ -563,7 +563,7 @@ class LabelEncode(object):
 class FDA(object):
     def __init__(self,
                  prob,
-                 amp_thred=0.006,
+                 amp_thred=0.001,
                  img_dir=None,
                  file=None,
                  ):
@@ -578,21 +578,31 @@ class FDA(object):
 
     def __call__(self, results):
         fda_trans = True if np.random.rand() < self.prob else False
-
+        # print('----------------------------------------:{}'.format(fda_trans))
         if fda_trans:
             origin_img = results['img']
+            origin_label = results['gt_semantic_seg']
 
             f1 = random.choice(self.img_names)
             img_dirname = os.path.join(self.img_dir, f1)
             target_image = self.readImage(img_dirname)
 
+            lbl_dirname = img_dirname.replace('images', 'labels').replace('.tif', '.png')
+            target_label = self.readImage(lbl_dirname)
+            if np.sum(target_label == 101) / (target_label.shape[0] * target_label.shape[1]) > 0.9:
+                # print('----------------------------------------:target_removewater')
+                return results
+            # print('----------------------------------------:{}'.format(self.amp_thred))
             if np.sum(np.all(origin_img == [0, 0, 0], 2)) / (origin_img.shape[0] * origin_img.shape[1]) > 0.05:
-                # print('----------------------------------------:1')
+                # print('----------------------------------------:origin_removebackground')
                 return results
             if np.sum(np.all(target_image == [0, 0, 0], 2)) / (target_image.shape[0] * target_image.shape[1]) > 0.05:
-                # print('----------------------------------------:2')
+                # print('----------------------------------------:target_removebackground')
                 return results
-
+            if np.sum(origin_label == 101) / (origin_label.shape[0] * origin_label.shape[1]) > 0.9:
+                # print('----------------------------------------:origin_removewater')
+                return results
+            # print('----------------------------------------:pass')
             aug = A.Compose([A.FDA([target_image], beta_limit=self.amp_thred, read_fn=lambda x: x, p=1)])
             origin_img = aug(image=origin_img)['image']
 
@@ -621,7 +631,7 @@ class ClassMixFDA(object):
     def __init__(self,
                  prob,
                  small_class=None,
-                 amp_thred=0.006,
+                 amp_thred=0.001,
                  file=None,
                  ):
         assert prob >= 0 and prob <= 1
@@ -637,6 +647,9 @@ class ClassMixFDA(object):
     def generate_class_mask(self, label, classes):
         if not isinstance(classes, list):
             classes = np.array([classes])
+        else:
+            classes = np.array(classes)
+
         if len(label.shape) == 2:
             label = np.expand_dims(label, axis=0)
         # debug = classes.unsqueeze(1).unsqueeze(2)
@@ -658,13 +671,38 @@ class ClassMixFDA(object):
                       (1 - stackedMask0) * origin_target)
         return data, target
 
-    def get_classLayout(self, class_value):
-        if class_value == 511:
-            return [511, 512, 613, 614]
-        elif class_value == 410:
-            return [410, 409]
+    def get_classLayout(self, class_value):    #自然林很多，可不用曾强   特征鲜明的类别可单独，，具依赖关系的类别间合并mix
+
+        class_list = [101, 202, 303, 204, 205,
+               806, 807, 808, 409, 410,
+               511, 512, 613, 614, 715,
+               716, 817]
+        select_num = random.randint(0, 9)
+        select_list = random.sample(class_list, select_num)
+
+        if class_value == 202:
+            select_list = set(select_list) | {202, 303}
         elif class_value == 303:
-            return [303, 512]
+            select_list = set(select_list) | {303, 512, 202}
+        elif class_value == 204:
+            select_list = set(select_list) | {204, 303, 205, 202}
+        elif class_value == 205:
+            select_list = set(select_list) | {204, 303, 205, 202}
+        elif class_value == 807:
+            select_list = set(select_list) | {807, 303, 202}
+        elif class_value == 808:
+            select_list = set(select_list) | {808, 303}
+        elif class_value == 410:
+            select_list = set(select_list) | {409, 410}
+        elif class_value == 512:
+            select_list = set(select_list) | {512, 202, 303}
+        elif class_value == 410:
+            select_list = set(select_list) | {410, 409}
+        else:
+            select_list = set(select_list) | {class_value}
+
+        select_list = [value for value in select_list]
+        return select_list
         
     def __call__(self, results):
         cut_mix = True if np.random.rand() < self.prob else False
@@ -684,23 +722,27 @@ class ClassMixFDA(object):
             cut_label = self.readImage(f1[1])
             # cut_img = cut_img[64:448, 64:448, :]
             # cut_label = cut_label[64:448, 64:448]
-            if np.sum(np.all(origin_img == [0, 0, 0], 2)) / (cut_img.shape[0] * cut_img.shape[1]) > 0.05:
-                # print('----------------------------------------:1')
+            if np.sum(np.all(origin_img == [0, 0, 0], 2)) / (origin_img.shape[0] * origin_img.shape[1]) > 0.05:
                 return results
             if np.sum(np.all(cut_img == [0, 0, 0], 2)) / (cut_img.shape[0] * cut_img.shape[1]) > 0.05:
-                # print('----------------------------------------:2')
                 return results
-            if np.sum(cut_label == 100) / (cut_img.shape[0] * cut_img.shape[1]) > 0.999:
-                # print('----------------------------------------:3')
+            if np.sum(cut_label == 101) / (cut_img.shape[0] * cut_img.shape[1]) > 0.9:
+                # print('----------------------------------cut_img_removewater')
                 return results
+            if np.sum(origin_label == 101) / (origin_label.shape[0] *origin_label.shape[1]) > 0.9:
+                # print('----------------------------------origin_img_removewater')
+                return results
+
             # print('----------------------------------------:4')
             aug = A.Compose([A.FDA([origin_img], beta_limit=self.amp_thred, read_fn=lambda x: x, p=1)])
             cut_img = aug(image=cut_img)['image']
 
             if results['label_map'] is not None:
                 class_choice = results['label_map'][class_choice]
+                class_choice = self.get_classLayout(class_choice)
                 # print('-----------map:{}'.format(class_choice))
             class_mask = self.generate_class_mask(cut_label, class_choice)
+            # print('-----------class_mask:{}'.format(np.unique(class_mask)))
             mix_img, mix_label = self.one_mix(class_mask, origin_img, cut_img, origin_label, cut_label)
             # print('----------------:mask:{}'.format(np.unique(class_mask)))
             results['img'] = mix_img
