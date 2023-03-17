@@ -91,27 +91,27 @@ class CustomBaseDataset(Dataset):
                  ann_dir=None,
                  seg_map_suffix='.png',
                  split=None,
+                 fold=0,
                  data_root=None,
                  test_mode=False,
                  ignore_index=255,
                  reduce_zero_label=False,
                  classes=None,
                  palette=None,
-                 gt_seg_map_loader_cfg=None):
+                 gt_seg_map_loader_cfg=None,
+                 label_map=None):
         self.pipeline = Compose(pipeline)
         self.img_dir = img_dir
         self.img_suffix = img_suffix
         self.ann_dir = ann_dir
         self.seg_map_suffix = seg_map_suffix
         self.split = split
+        self.fold = fold
         self.data_root = data_root
         self.test_mode = test_mode
         self.ignore_index = ignore_index
         self.reduce_zero_label = reduce_zero_label
-        self.label_map = {0: 0, 1: 101, 2: 202, 3: 303, 4: 204, 5: 205,
-               6: 806, 7: 807, 8: 808, 9: 409, 10: 410,
-               11: 511, 12: 512, 13: 613, 14: 614, 15: 715,
-               16: 716, 17: 817} #{0: 0, 1: 100, 2: 200, 3: 300, 4: 400, 5: 500, 6: 600, 7: 700, 8: 800}  #{0: 100, 1: 200, 2: 300, 3: 400, 4: 500, 5: 600, 6: 700, 7: 800}
+        self.label_map = label_map #{0: 0, 1: 100, 2: 200, 3: 300, 4: 400, 5: 500, 6: 600, 7: 700, 8: 800}  #{0: 100, 1: 200, 2: 300, 3: 400, 4: 500, 5: 600, 6: 700, 7: 800}
         self.custom_classes = True
         # self.CLASSES, self.PALETTE = self.get_classes_and_palette(
         #     classes, palette)
@@ -206,10 +206,10 @@ class CustomBaseDataset(Dataset):
 
         img_infos = []
         if split is not None:
-            fold = 0
+            fold = self.fold
             print('-----------------------------------------------------------fold:{}'.format(fold))
             if split == 'train':
-                df = pd.read_csv('/data_zs/data/open_datasets/fusai_release/train/split.csv')
+                df = pd.read_csv('/workspace/mmsegmentation_rsipac/data_config/split.csv')
                 for row in range(len(df)):
                     if int(df['fold'][row]) != fold:
                         img = df['name'][row]
@@ -220,7 +220,7 @@ class CustomBaseDataset(Dataset):
                         img_infos.append(img_info)
 
             if split == 'val':
-                df = pd.read_csv('/data_zs/data/open_datasets/fusai_release/train/split.csv')
+                df = pd.read_csv('/workspace/mmsegmentation_rsipac/data_config/split.csv')
                 for row in range(len(df)):
                     if int(df['fold'][row]) == fold:
                         img = df['name'][row]

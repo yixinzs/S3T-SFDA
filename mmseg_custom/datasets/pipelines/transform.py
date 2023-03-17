@@ -9,6 +9,7 @@ from osgeo import gdal
 import pandas as pd
 import random
 import os
+import json
 
 # @PIPELINES.register_module()
 class SETR_Resize(object):
@@ -508,6 +509,29 @@ class AlbumentationAug(object):
             )  # -------------3
         ]
 
+        self.tranforms_v3 = [
+            A.ShiftScaleRotate(shift_limit=0.2, scale_limit=(-0.5, 1.5), rotate_limit=30, p=0.5),  #(-0.5, 1.0)  (-0.5, 1.5)
+            A.RandomBrightnessContrast(p=0.5),  # ------------1
+            A.GaussNoise(p=0.2),
+            # A.GaussNoise(var_limit=(0.0, 15.0), mean=0, p=0.2),  # @噪声变换  #-----------4
+            A.OneOf(
+                [
+                    A.Blur(blur_limit=3, p=1.0),  # @边缘变换
+                    A.MedianBlur(blur_limit=3, p=1.0)
+                ],
+                p=0.1,
+            ),
+            A.RGBShift(r_shift_limit=20, g_shift_limit=20, b_shift_limit=20, p=0.3),  # -------2
+            A.OneOf(
+                [
+                    A.CLAHE(clip_limit=4.0, tile_grid_size=(8, 8), always_apply=False, p=0.5),  # @色调变换1
+                    A.HueSaturationValue(hue_shift_limit=20, sat_shift_limit=30, val_shift_limit=20, p=0.5),  # #@色调变换1
+                    A.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1, p=0.5),  # @色调变换1
+                ],
+                p=1.0,
+            )  # -------------3
+        ]
+
     def TrainAugmentation(self, p=1):
 
         return A.Compose(self.tranforms_v2, p=p)
@@ -560,6 +584,56 @@ class LabelEncode(object):
 
 
 @PIPELINES.register_module()
+class CutReplace(object):
+    def __init__(self,
+                 prob,
+                 img_dir=None,
+                 lbl_dir=None,
+                 file=None,
+                 ):
+        self.prob = prob
+        self.img_dir = img_dir
+        self.lbl_dir = lbl_dir
+        self.file = file
+
+        df = pd.read_csv(file)
+        self.img_names = df['name']
+
+    def __call__(self, results):
+        replace = True if np.random.rand() < self.prob else False
+
+        origin_img = results['img']
+        origin_label = results['gt_semantic_seg']
+
+        cut = np.sum(origin_label == 613) / (origin_label.shape[0] * origin_label.shape[1]) >= 0.8 or np.sum(origin_label == 101) / (origin_label.shape[0] * origin_label.shape[1]) >= 0.8
+        if cut and replace:
+            # print('----------------------------------cutreplace_img_selecttree')
+
+            f1 = random.choice(self.img_names)
+            img_dirname = os.path.join(self.img_dir, f1)
+            lbl_dirname = os.path.join(self.lbl_dir, f1.replace('.tif', '.png'))
+            target_image = self.readImage(img_dirname)
+            target_label = self.readImage(lbl_dirname)
+
+            results['img'] = target_image
+            results['gt_semantic_seg'] = target_label
+            results['replace_name'] = f1
+            return results
+
+        return results
+
+    def readImage(self, dirname):
+        if dirname.endswith('.png'):
+            image = cv2.imread(dirname, -1)
+        elif dirname.endswith('.tif'):
+            Img = gdal.Open(dirname)
+            image = Img.ReadAsArray(0, 0, Img.RasterXSize, Img.RasterYSize)
+            if len(image.shape) == 3:
+                image = np.rollaxis(image, 0, 3)
+        return image
+
+
+@PIPELINES.register_module()
 class FDA(object):
     def __init__(self,
                  prob,
@@ -587,11 +661,11 @@ class FDA(object):
             img_dirname = os.path.join(self.img_dir, f1)
             target_image = self.readImage(img_dirname)
 
-            lbl_dirname = img_dirname.replace('images', 'labels').replace('.tif', '.png')
-            target_label = self.readImage(lbl_dirname)
-            if np.sum(target_label == 101) / (target_label.shape[0] * target_label.shape[1]) > 0.9:
-                # print('----------------------------------------:target_removewater')
-                return results
+            # lbl_dirname = img_dirname.replace('images', 'labels').replace('.tif', '.png')
+            # target_label = self.readImage(lbl_dirname)
+            # if np.sum(target_label == 101) / (target_label.shape[0] * target_label.shape[1]) > 0.9:
+            #     # print('----------------------------------------:target_removewater')
+            #     return results
             # print('----------------------------------------:{}'.format(self.amp_thred))
             if np.sum(np.all(origin_img == [0, 0, 0], 2)) / (origin_img.shape[0] * origin_img.shape[1]) > 0.05:
                 # print('----------------------------------------:origin_removebackground')
@@ -711,6 +785,10 @@ class ClassMixFDA(object):
             origin_img = results['img']
             origin_label = results['gt_semantic_seg']
 
+            if np.sum(origin_label == 613) / (origin_label.shape[0] * origin_label.shape[1]) < 0.7:
+                # print('----------------------------------orgin_img_removetree')
+                return results
+
             class_choice = np.random.choice(self.small_class, replace=False)
             index = np.random.choice(len(self.sample_class_stats[str(class_choice)]))
             f1 = self.sample_class_stats[str(class_choice)][index]
@@ -722,16 +800,16 @@ class ClassMixFDA(object):
             cut_label = self.readImage(f1[1])
             # cut_img = cut_img[64:448, 64:448, :]
             # cut_label = cut_label[64:448, 64:448]
-            if np.sum(np.all(origin_img == [0, 0, 0], 2)) / (origin_img.shape[0] * origin_img.shape[1]) > 0.05:
-                return results
-            if np.sum(np.all(cut_img == [0, 0, 0], 2)) / (cut_img.shape[0] * cut_img.shape[1]) > 0.05:
-                return results
-            if np.sum(cut_label == 101) / (cut_img.shape[0] * cut_img.shape[1]) > 0.9:
-                # print('----------------------------------cut_img_removewater')
-                return results
-            if np.sum(origin_label == 101) / (origin_label.shape[0] *origin_label.shape[1]) > 0.9:
-                # print('----------------------------------origin_img_removewater')
-                return results
+            # if np.sum(np.all(origin_img == [0, 0, 0], 2)) / (origin_img.shape[0] * origin_img.shape[1]) > 0.05:
+            #     return results
+            # if np.sum(np.all(cut_img == [0, 0, 0], 2)) / (cut_img.shape[0] * cut_img.shape[1]) > 0.05:
+            #     return results
+            # if np.sum(cut_label == 101) / (cut_img.shape[0] * cut_img.shape[1]) > 0.9:
+            #     # print('----------------------------------cut_img_removewater')
+            #     return results
+            # if np.sum(origin_label == 101) / (origin_label.shape[0] *origin_label.shape[1]) > 0.9:
+            #     # print('----------------------------------origin_img_removewater')
+            #     return results
 
             # print('----------------------------------------:4')
             aug = A.Compose([A.FDA([origin_img], beta_limit=self.amp_thred, read_fn=lambda x: x, p=1)])
@@ -739,7 +817,7 @@ class ClassMixFDA(object):
 
             if results['label_map'] is not None:
                 class_choice = results['label_map'][class_choice]
-                class_choice = self.get_classLayout(class_choice)
+                # class_choice = self.get_classLayout(class_choice)
                 # print('-----------map:{}'.format(class_choice))
             class_mask = self.generate_class_mask(cut_label, class_choice)
             # print('-----------class_mask:{}'.format(np.unique(class_mask)))
@@ -770,6 +848,123 @@ class ClassMixFDA(object):
     def __repr__(self):
         repr_str = self.__class__.__name__
         repr_str += f'(small_class={self.small_class}, file={self.file})'
+        return repr_str
+
+
+@PIPELINES.register_module()
+class DynamicNormalize(object):
+
+    def __init__(self, mean, std, file=None, to_rgb=True):
+        self.mean = np.array(mean, dtype=np.float32)
+        self.std = np.array(std, dtype=np.float32)
+        self.to_rgb = to_rgb
+
+        with open(file, 'r') as of:
+            self.name_meanstd = json.load(of)
+
+    def __call__(self, results):
+
+        # img = results['img']
+
+        try:
+            name = os.path.splitext(results['replace_name'])[0]
+            # print('---------------------name_replace:{}'.format(name))
+        except:
+            filename = results['filename']
+            name = os.path.splitext(os.path.basename(filename))[0]
+            # print('---------------------name:{}'.format(name))
+
+        meanstd = self.name_meanstd[name]
+        mean = np.array(meanstd[0])
+        std = np.array(meanstd[1])
+        # print('------------mean:{},std:{}'.format(mean, std))
+        # mask_img = img.sum(2) != 0
+        # if np.sum(mask_img) == 0:
+        #     print('---------------------sum = 0:{}'.format(os.path.basename(results['ori_filename'])))
+        #     mean, std = self.mean, self.std
+        # else:
+        #     valid_img = img[mask_img]
+        #     mean = np.mean(valid_img, axis=0)
+        #     std = np.std(valid_img, axis=0)
+        #
+        # if 0 in std:
+        #     print('------------mean_0:{},std_0:{}'.format(mean, std))
+        #     mean, std = self.mean, self.std
+        # if np.isnan(mean).any() or np.isnan(std).any():
+        #     print('------------mean_nan:{},std_nan:{}'.format(mean, std))
+        #     mean, std = self.mean, self.std
+
+        results['img'] = mmcv.imnormalize(results['img'], mean, std,
+                                          self.to_rgb)
+        results['img_norm_cfg'] = dict(
+            mean=mean, std=std, to_rgb=self.to_rgb)
+        return results
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f'(mean={self.mean}, std={self.std}, to_rgb=' \
+                    f'{self.to_rgb})'
+        return repr_str
+
+
+@PIPELINES.register_module()
+class RandomNormalize(object):
+    """Normalize the image.
+
+    Added key is "img_norm_cfg".
+
+    Args:
+        mean (sequence): Mean values of 3 channels.
+        std (sequence): Std values of 3 channels.
+        to_rgb (bool): Whether to convert the image from BGR to RGB,
+            default is true.
+    """
+
+    def __init__(self, mean_a, std_a, mean_b=None, std_b=None, bias=10, to_rgb=False):
+        self.mean_a = mean_a
+        self.std_a = std_a
+        self.mean_b = mean_b
+        self.std_b = std_b
+
+        self.bias = bias
+        self.to_rgb = to_rgb
+
+    def set_randomDisturb(self, a, b=None, bias=10):
+        if b is not None:
+            assert len(a) == len(b), 'error'
+            rand_out = [random.uniform(x, y) for x, y in zip(a, b)]
+        else:
+            rand_out = [random.uniform(x - bias, x + bias) for x in a]
+
+        return np.array(rand_out)
+
+    def __call__(self, results):
+        """Call function to normalize images.
+
+        Args:
+            results (dict): Result dict from loading pipeline.
+
+        Returns:
+            dict: Normalized results, 'img_norm_cfg' key is added into
+                result dict.
+        """
+        # print('------------mean:{},std:{}'.format(self.mean_b, self.std_b))
+        if self.mean_b is not None and self.std_b is not None:
+            mean, std = self.set_randomDisturb(self.mean_a, self.mean_b), self.set_randomDisturb(self.std_a, self.std_b)
+        else:
+            mean, std = self.set_randomDisturb(self.mean_a, bias=self.bias), self.set_randomDisturb(self.std_a,
+                                                                                                    bias=self.bias)
+        # print('------------mean:{},std:{}'.format(mean, std))
+        results['img'] = mmcv.imnormalize(results['img'], mean, std, self.to_rgb)
+
+        results['img_norm_cfg'] = dict(
+            mean=mean, std=std, to_rgb=self.to_rgb)
+        return results
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f'(mean={self.mean_a}, std={self.std_b}, to_rgb=' \
+                    f'{self.to_rgb})'
         return repr_str
 
 

@@ -4,12 +4,19 @@ import sys
 import mmcv
 import torch
 
-from mmcv.runner import (get_dist_info, init_dist, load_checkpoint,
+cur_path = os.path.abspath(os.path.dirname(__file__))  #https://www.cnblogs.com/joldy/p/6144813.html
+root_path = os.path.split(cur_path)[0]
+sys.path.append(root_path)    #sys.path.append:https://blog.csdn.net/zxyhhjs2017/article/details/80582246?utm_medium=distribute.pc_relevant.none-task-blog-title-3&spm=1001.2101.3001.4242
+
+from mmcv.runner import (get_dist_info, init_dist, #load_checkpoint,
                          wrap_fp16_model)
+from mmcv_custom.checkpoint import load_checkpoint
 
 from mmcv.image import tensor2imgs
 import os.path as osp
 from mmcv.parallel import collate, scatter
+from mmcv.runner import (get_dist_info, init_dist, #load_checkpoint,
+                         wrap_fp16_model)
 
 cur_path = os.path.abspath(os.path.dirname(__file__))  #https://www.cnblogs.com/joldy/p/6144813.html
 root_path = os.path.split(cur_path)[0]
@@ -21,7 +28,7 @@ from mmseg.models import build_segmentor
 import mmcv_custom
 import  mmseg_custom
 
-def collect_model(cfg_path_list, model_path_list, device):
+def collect_model(cfg_path_list, model_path_list, device, fp16=True):
     assert len(cfg_path_list) == len(model_path_list), 'error'
     model_list = []
     for config, checkpoint in zip(cfg_path_list, model_path_list):
@@ -32,8 +39,10 @@ def collect_model(cfg_path_list, model_path_list, device):
 
         cfg.model.train_cfg = None
         model = build_segmentor(cfg.model, test_cfg=cfg.get('test_cfg'))
+        if fp16:
+            wrap_fp16_model(model)
         checkpoint = load_checkpoint(model, checkpoint, map_location='cpu')
-        model.CLASSES = checkpoint['meta']['CLASSES']
+        # model.CLASSES = checkpoint['meta']['CLASSES']
         # model = MMDataParallel(model, device_ids=[0])
         model.to(device)
         model.eval()
@@ -59,8 +68,8 @@ def get_dataset(img_path, aug_test=False, distributed=None):
                     dict(type='RandomFlip'),
                     dict(
                         type='Normalize',
-                        mean=[61.455, 64.868, 74.614],
-                        std=[32.379, 35.219, 42.206],
+                        mean=[61.455, 64.868, 74.614],   #[61.455, 64.868, 74.614]
+                        std=[32.379, 35.219, 42.206],    #[32.379, 35.219, 42.206]
                         to_rgb=False),
                     dict(type='ImageToTensor', keys=['img']),
                     dict(type='Collect', keys=['img'])
@@ -68,7 +77,7 @@ def get_dataset(img_path, aug_test=False, distributed=None):
         ])
     if aug_test:
         test_cfg['pipeline'][1]['img_ratios'] = [
-            1.0, 1.25, 1.5, 1.75  #, 2  0.75,
+            1.0, 1.25, 1.5, 1.75, 2.0, 2.25  #, 2  0.75,
         ]   #0.5, 0.75, 1.0, 1.25, 1.5, 1.75   #1.0, 1.25, 1.5   #0.5,
         test_cfg['pipeline'][1]['flip'] = True
         test_cfg['pipeline'][1]['flip_direction'] = ["horizontal", "vertical"]
@@ -166,16 +175,16 @@ def gpu_test(model_list, data_loader, show_dir):
 
 if __name__ == '__main__':
     input_path = r'/data_zs/data/open_datasets/fusai_release/test'
-    save_path = r'/data_zs/output/rsipac_semi/test/hornet_tiny_80k_b12_ce_augv2_448s1.25'
-    config_path_list = ['/data_zs/output/rsipac_semi/checkpoint/hornet_tiny_80k_b12_ce_augv2_448s1.25/upernet_hornet_tiny_gf_512_80k_rsipac_s1.5.py']
-    model_path_list = ['/data_zs/output/rsipac_semi/checkpoint/hornet_tiny_80k_b12_ce_augv2_448s1.25/latest.pth']
+    save_path = r'/data_zs/output/rsipac_semi/test/poly_Softce_fda-cutreplace-classmix14_448s1.25_swa_fold0-10'
+    config_path_list = ['/data_zs/output/rsipac_semi/checkpoint/convnext_tiny_80k_b10_poly_Softce_fda-cutreplace-classmix14_448s1.25_swa_fold0/upernet_convnext_tiny_rsipac_s1.5_ms.py', '/data_zs/output/rsipac_semi/checkpoint/convnext_tiny_80k_b10_poly_Softce_fda-cutreplace-classmix14_448s1.25_swa_fold10/upernet_convnext_tiny_rsipac_s1.5_ms.py'] #['/data_zs/output/rsipac_semi/checkpoint/convnext_tiny_80k_b10_poly_Softce_fda0.001_448s1.25_fold0/upernet_convnext_tiny_rsipac_s1.5_ms.py', '/data_zs/output/rsipac_semi/checkpoint/convnext_tiny_80k_b10_poly_Softce_fda0.001_448s1.25_fold4/upernet_convnext_tiny_rsipac_s1.5_ms.py']
+    model_path_list = ['/data_zs/output/rsipac_semi/checkpoint/convnext_tiny_80k_b10_poly_Softce_fda-cutreplace-classmix14_448s1.25_swa_fold0/swa_final.pth', '/data_zs/output/rsipac_semi/checkpoint/convnext_tiny_80k_b10_poly_Softce_fda-cutreplace-classmix14_448s1.25_swa_fold10/swa_final.pth'] #['/data_zs/output/rsipac_semi/checkpoint/convnext_tiny_80k_b10_poly_Softce_fda0.001_448s1.25_fold0/latest.pth', '/data_zs/output/rsipac_semi/checkpoint/convnext_tiny_80k_b10_poly_Softce_fda0.001_448s1.25_fold4/latest.pth']
     aug_test = True
     device_id = 0
 
     os.makedirs(save_path, exist_ok=True)
 
     dataset = get_dataset(input_path, aug_test)
-    data_loader = build_dataloader(dataset, samples_per_gpu=4, workers_per_gpu=4, dist=False, shuffle=False)
+    data_loader = build_dataloader(dataset, samples_per_gpu=1, workers_per_gpu=4, dist=False, shuffle=False)
 
     device = 'cuda:{}'.format(device_id)
     model_list = collect_model(config_path_list, model_path_list, device)

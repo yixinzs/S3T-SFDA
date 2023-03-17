@@ -3,7 +3,7 @@ from math import cos, pi
 
 import mmcv
 from mmcv.runner.hooks.hook import HOOKS, Hook
-
+import math
 
 class LrUpdaterHook(Hook):
     """LR Scheduler in MMCV.
@@ -195,6 +195,48 @@ class PolyRestartLrUpdaterHook(LrUpdaterHook):
 
         coeff = (1 - min((progress - nearest_restart) / current_periods, 1))**self.power
         return (base_lr - target_lr) * coeff * current_weight + self.min_lr
+
+
+@HOOKS.register_module()
+class SWAPolyRestartLrUpdaterHook(LrUpdaterHook):
+
+    def __init__(self,
+                 restart_ratio=0.75,
+                 restart_step=5,
+                 power=1.,
+                 min_lr=None,
+                 min_lr_ratio=None,
+                 **kwargs):
+        assert (min_lr is None) ^ (min_lr_ratio is None)
+        self.min_lr = min_lr
+        self.min_lr_ratio = min_lr_ratio
+        self.restart_ratio = restart_ratio
+        self.restart_step = restart_step
+        self.power = power
+        super(SWAPolyRestartLrUpdaterHook, self).__init__(**kwargs)
+
+    def get_lr(self, runner, base_lr):
+        if self.by_epoch:
+            progress = runner.epoch
+        else:
+            progress = runner.iter
+
+        if self.min_lr_ratio is not None:
+            target_lr = base_lr * self.min_lr_ratio
+        else:
+            target_lr = self.min_lr
+
+        normal_max_iters = int(runner._max_iters * self.restart_ratio)
+        swa_step_max_iters = (runner._max_iters - normal_max_iters) // self.restart_step
+        # print('-------------------normal_max_iters_lr:{}, swa_step_max_iters_lr:{}'.format(normal_max_iters, swa_step_max_iters))
+        def swa_lambda_poly(iters, power):
+            if iters < normal_max_iters:
+                return pow(1.0 - iters / normal_max_iters, power)
+            else:  # set lr to half of initial lr and start swa
+                return 0.5 * pow(1.0 - ((iters - normal_max_iters) % swa_step_max_iters) / swa_step_max_iters, power)
+
+        coeff = swa_lambda_poly(progress, self.power)
+        return (base_lr - target_lr) * coeff + self.min_lr
 
 
 def get_position_from_periods(iteration, cumulative_periods):

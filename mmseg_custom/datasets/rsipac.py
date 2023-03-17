@@ -12,6 +12,7 @@ from PIL import Image
 from mmseg.datasets.builder import DATASETS
 # from .custom import CustomDataset
 from .custom_base import CustomBaseDataset
+import cv2
 
 @DATASETS.register_module()
 class RSIPACDataset(CustomBaseDataset):
@@ -115,3 +116,14 @@ class RSIPACDataset(CustomBaseDataset):
         result_files = self.results2img(results, imgfile_prefix, to_label_id,
                                         indices)
         return result_files
+
+    def show_result(self, pred, out_file):
+        # print('-----------------------rsipac show result')
+        mask = self.decode_segmap(pred, self.label_map)
+        process_name = [124, 652, 664, 799, 805, 1197, 1282, 2157, 2672, 2816, 3238, 3293, 3769, 4006]  # [124, 664, 3293, 3769]
+        name = int(osp.splitext(osp.basename(out_file))[0])
+        # print('------------------------------------name:{}'.format(name))
+        if int(name) in process_name:
+            # print('------------------------------------remove background')
+            mask[np.where(mask != 613)] = 0
+        cv2.imwrite(out_file.replace('.tif', '.png'), mask)

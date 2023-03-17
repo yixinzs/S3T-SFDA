@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/mmsegmentation_rsipac.iml" filepath="$PROJECT_DIR$/.idea/mmsegmentation_rsipac.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/mmsegmentation.iml" filepath="$PROJECT_DIR$/.idea/mmsegmentation.iml" />
     </modules>
   </component>
 </project>

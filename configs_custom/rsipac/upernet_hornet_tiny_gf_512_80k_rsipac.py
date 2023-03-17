@@ -35,7 +35,7 @@ model = dict(
         in_channels=256,
         num_classes=18
     ), 
-    test_cfg = dict(mode='slide', crop_size=crop_size, stride=(341, 341)),
+    test_cfg=dict(mode='whole'),
 )
 
 # optimizer = dict(constructor='LearningRateDecayOptimizerConstructorHorNet', type='AdamW',   #, _delete_=True
@@ -68,24 +68,46 @@ img_norm_cfg = dict(
 train_pipeline = [
     dict(type='LoadImageFromFileCustom'),
     dict(type='LoadAnnotationsCustom'),    #, reduce_zero_label=True
-    # dict(type='ClassMixFDA', prob=0.5, small_class=[1, 2, 3, 4, 5, 6, 7, 8], amp_thred=0.006, file='/data_zs/output/rsipac/config/small_class_with_samples_512x512_fold0.json'),   #[1, 3, 4, 5, 6]
+    dict(type='CutReplace', prob=0.5, img_dir='/data_zs/data/open_datasets/fusai_release/train/images', lbl_dir='/data_zs/data/open_datasets/fusai_release/train/labels', file='/data_zs/data/open_datasets/fusai_release/train/artificial_forest.csv'),
+    dict(type='ClassMixFDA', prob=1, small_class=[14], amp_thred=0.001, file='/data_zs/output/rsipac_semi/config/sample_small26214-52428_class_stats_512x512_fold0.json'),   #[1, 3, 4, 5, 6]  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+    dict(type='FDA', prob=0.2, amp_thred=0.001, img_dir='/data_zs/data/open_datasets/fusai_release/train/images', file='/data_zs/data/open_datasets/fusai_release/train/split.csv'),
     dict(type='AlbumentationAug'),
     dict(type='LabelEncode'),
-    dict(type='Resize', img_scale=crop_size, ratio_range=(0.5, 2.0)),
-    dict(type='RandomCrop', crop_size=crop_size, cat_max_ratio=0.75),
+    dict(type='RandomCrop', crop_size=(448, 448), cat_max_ratio=0.75),   #crop_size  (448, 448)  (384, 384)  (448, 448)
+    dict(type='Resize', ratio_range=(1.25, 1.25)),   #(1.25, 1.25)   (1.5, 1.5)
     dict(type='RandomFlip', prob=0.5, direction='horizontal'),
     dict(type='RandomFlip', prob=0.5, direction='vertical'),
     dict(type='PhotoMetricDistortion'),
-    # dict(type='PhotoMetricDistortion'),
     dict(type='Normalize', **img_norm_cfg),
-    dict(type='Pad', size=crop_size, pad_val=0, seg_pad_val=255),
+    # dict(type='Pad', size=crop_size, pad_val=0, seg_pad_val=255),
     dict(type='DefaultFormatBundle'),
     dict(type='Collect', keys=['img', 'gt_semantic_seg'])
 ]
+
+test_pipeline = [
+    dict(type='LoadImageFromFileCustom'),
+    dict(
+        type='MultiScaleFlipAug',
+        img_scale=(512, 512),
+        img_ratios=1.25,  #1.25  1.5
+        # img_ratios=[0.5, 0.75, 1.0, 1.25, 1.5, 1.75],
+        flip=False,
+        transforms=[
+            dict(type='Resize', keep_ratio=True),
+            dict(type='ResizeToMultiple', size_divisor=32),
+            dict(type='RandomFlip'),
+            dict(type='Normalize', **img_norm_cfg),
+            dict(type='ImageToTensor', keys=['img']),
+            dict(type='Collect', keys=['img']),
+        ])
+]
+
 # By default, models are trained on 8 GPUs with 2 images per GPU
-data=dict(samples_per_gpu=12,
-          workers_per_gpu=12,
-          train=dict(pipeline=train_pipeline))
+data=dict(samples_per_gpu=10,
+          workers_per_gpu=10,
+          train=dict(pipeline=train_pipeline),
+          val=dict(pipeline=test_pipeline),
+          test=dict(pipeline=test_pipeline))
 
 runner = dict(type='IterBasedRunner', max_iters=80000)
 
@@ -97,4 +119,4 @@ checkpoint_config = dict(by_epoch=False, interval=10000, max_keep_ckpts=3)
 evaluation = dict(interval=10000, metric='FWIoU', save_best='FWIoU', greater_keys='FWIoU')
 # evaluation = dict(interval=10000, metric='mIoU', pre_eval=True)
 
-name = 'hornet_tiny_80k_b12_ce_augv2_s1.25'
+name = 'hornet_tiny_80k_b10_poly_ce_fda-cutreplace-classmix14_448s1.25_fold0'

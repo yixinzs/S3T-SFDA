@@ -9,35 +9,104 @@ import os.path as osp
 import time
 from mmcv.parallel import collate, scatter
 
+# @HOOKS.register_module()
+# class SWAHook(Hook):
+#     def __init__(self,
+#                  swa_start=None,
+#                  swa_freq=None,
+#                  swa_lr=None,
+#                  by_epoch=False):
+#         pass
+#         self._auto_mode, (self.swa_start, self.swa_freq) = \
+#             self._check_params(self, swa_start, swa_freq)
+#         self.swa_lr = swa_lr
+#
+#         self.swa_model = None
+#         self.by_epoch = by_epoch
+#
+#         if self._auto_mode:
+#             if swa_start < 0:
+#                 raise ValueError("Invalid swa_start: {}".format(swa_start))
+#             if swa_freq < 1:
+#                 raise ValueError("Invalid swa_freq: {}".format(swa_freq))
+#         else:
+#             if self.swa_lr is not None:
+#                 log_every_n(
+#                     "Some of swa_start, swa_freq is None, ignoring swa_lr")
+#             # If not in auto mode make all swa parameters None
+#             self.swa_lr = None
+#             self.swa_start = None
+#             self.swa_freq = None
+#
+#         if self.swa_lr is not None and self.swa_lr < 0:
+#             raise ValueError("Invalid SWA learning rate: {}".format(swa_lr))
+#
+#     def before_run(self, runner):
+#
+#         model = runner.model
+#         if is_module_wrapper(model):
+#             model = model.module
+#         self.swa_model = AveragedModel(model)
+#
+#     def after_train_iter(self, runner):
+#         if runner.iter >= self.swa_start and (runner.iter - self.swa_start) % self.swa_freq == 0:
+#             model = runner.model
+#             if is_module_wrapper(model):
+#                 model = model.module
+#             self.swa_model.update_parameters(model)
+#             self.swa_save(runner)
+#         if runner.iter + 1 == runner._max_iters:
+#             update_bn(runner, self.swa_model)
+#             self.swa_save(runner, True)
+#
+#
+#     def swa_save(self, runner, update_bn=False):
+#         if not update_bn:
+#             path = osp.join(runner.work_dir, 'swa_epoch_' + str(runner.iter) + '.pth')
+#             save_checkpoint(self.swa_model, path)
+#         else:
+#             path = osp.join(runner.work_dir, 'swa_final.pth')
+#             save_checkpoint(self.swa_model, path)
+#
+#     @staticmethod
+#     def _check_params(self, swa_start, swa_freq):
+#         params = [swa_start, swa_freq]
+#         params_none = [param is None for param in params]
+#         if not all(params_none) and any(params_none):
+#             log_every_n(
+#                 "Some of swa_start, swa_freq is None, ignoring other")
+#         for i, param in enumerate(params):
+#             if param is not None and not isinstance(param, int):
+#                 params[i] = int(param)
+#                 log_every_n("Casting swa_start, swa_freq to int")
+#         return not any(params_none), params
+
+
 @HOOKS.register_module()
 class SWAHook(Hook):
     def __init__(self,
                  swa_start=None,
+                 swa_start_ratio=0.75,
                  swa_freq=None,
+                 swa_restart_step=5,
                  swa_lr=None,
                  by_epoch=False):
-        pass
-        self._auto_mode, (self.swa_start, self.swa_freq) = \
-            self._check_params(self, swa_start, swa_freq)
+
         self.swa_lr = swa_lr
 
         self.swa_model = None
         self.by_epoch = by_epoch
 
-        if self._auto_mode:
-            if swa_start < 0:
-                raise ValueError("Invalid swa_start: {}".format(swa_start))
-            if swa_freq < 1:
-                raise ValueError("Invalid swa_freq: {}".format(swa_freq))
-        else:
-            if self.swa_lr is not None:
-                log_every_n(
-                    "Some of swa_start, swa_freq is None, ignoring swa_lr")
-            # If not in auto mode make all swa parameters None
-            self.swa_lr = None
-            self.swa_start = None
-            self.swa_freq = None
+        if self.swa_lr is not None:
+            log_every_n(
+                "Some of swa_start, swa_freq is None, ignoring swa_lr")
+        # If not in auto mode make all swa parameters None
+        assert (swa_start is not None) or (swa_start_ratio is not None), 'need to set param [swa_start] or [swa_start_ratio]'
 
+        self.swa_start = swa_start
+        self.swa_start_ratio = swa_start_ratio
+        self.swa_freq = swa_freq
+        self.swa_restart_step = swa_restart_step
         if self.swa_lr is not None and self.swa_lr < 0:
             raise ValueError("Invalid SWA learning rate: {}".format(swa_lr))
 
@@ -49,12 +118,19 @@ class SWAHook(Hook):
         self.swa_model = AveragedModel(model)
 
     def after_train_iter(self, runner):
-        if (runner.iter + 1) > self.swa_start and (runner.iter - self.swa_start + 1) % self.swa_freq == 0:
+        if self.swa_start is not None and self.swa_freq is not None:
+            normal_max_iters = self.swa_start
+            swa_step_max_iters = (runner._max_iters - normal_max_iters) // self.swa_freq
+        else:
+            normal_max_iters = int(runner._max_iters * self.swa_start_ratio)
+            swa_step_max_iters = (runner._max_iters - normal_max_iters) // self.swa_restart_step
+        # print('-------------------normal_max_iters:{}, swa_step_max_iters:{}'.format(normal_max_iters, swa_step_max_iters))
+        if runner.iter > normal_max_iters and (runner.iter - normal_max_iters) % swa_step_max_iters == 0:
             model = runner.model
             if is_module_wrapper(model):
                 model = model.module
             self.swa_model.update_parameters(model)
-            self.swa_save(runner)
+            # self.swa_save(runner)
         if runner.iter + 1 == runner._max_iters:
             update_bn(runner, self.swa_model)
             self.swa_save(runner, True)
@@ -173,7 +249,7 @@ class AveragedModel(Module):
 
     def forward(self, img, img_metas,  **kwargs):
         device = kwargs['device']
-        print('-----------------------------device:{}'.format(device))
+        # print('-----------------------------device:{}'.format(device))
         img = img.data[0].to(device)  #
         # print('------------------------:{}'.format(img.shape))
         img_metas = img_metas.data[0]  #
@@ -229,7 +305,7 @@ def update_bn(runner, model, device=None):
     was_training = model.training
     model.train()
     for module in momenta.keys():
-        module.momentum = None
+        module.momentum = None           #BatchNorm的更新：https://blog.csdn.net/qq_39208832/article/details/117930625
         module.num_batches_tracked *= 0
 
     data_loader = runner.data_loader
@@ -242,11 +318,11 @@ def update_bn(runner, model, device=None):
         #     data_batch = scatter(data_batch, [device])[0]
         # else:
         #     data_batch['img_metas'] = [i.data_batch[0] for i in data_batch['img_metas']]
-        print('--------------data_batch:{}'.format(data_batch.keys()))
+        # print('--------------data_batch:{}'.format(data_batch.keys()))
         model(**data_batch, device=device)  #, runner.optimizer
 
     for bn_module in momenta.keys():
-        bn_module.momentum = momenta[bn_module]
+        bn_module.momentum = momenta[bn_module]  #bn_module.momentum不更新，更新的是module.running_mean和module.running_var
     model.train(was_training)
 
 

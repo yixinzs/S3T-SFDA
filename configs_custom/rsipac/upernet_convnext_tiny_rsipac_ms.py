@@ -26,10 +26,12 @@ model = dict(
     decode_head=dict(
         in_channels=[96, 192, 384, 768],
         num_classes=18,
+        loss_decode=[dict(type='SoftCrossEntropyLoss', smooth_factor=0.1, ignore_index=255, loss_weight=1.0)],
     ),
     auxiliary_head=dict(
         in_channels=384,
-        num_classes=18
+        num_classes=18,
+        loss_decode=[dict(type='SoftCrossEntropyLoss', smooth_factor=0.1, ignore_index=255, loss_weight=0.4)],
     ), 
 )
 
@@ -63,7 +65,10 @@ img_norm_cfg = dict(
 train_pipeline = [
     dict(type='LoadImageFromFileCustom'),
     dict(type='LoadAnnotationsCustom'),    #, reduce_zero_label=True
-    # dict(type='ClassMixFDA', prob=0.5, small_class=[1, 2, 3, 4, 5, 6, 7, 8], amp_thred=0.006, file='/data_zs/output/rsipac/config/small_class_with_samples_512x512_fold0.json'),   #[1, 3, 4, 5, 6]
+    dict(type='CutReplace', prob=0.5, img_dir='/data_zs/data/open_datasets/fusai_release/train/images', lbl_dir='/data_zs/data/open_datasets/fusai_release/train/labels', file='/data_zs/data/open_datasets/fusai_release/train/artificial_forest.csv'),
+    dict(type='ClassMixFDA', prob=1, small_class=[14], amp_thred=0.001, file='/data_zs/output/rsipac_semi/config/sample_small26214-52428_class_stats_512x512_fold0.json'),
+    # [1, 3, 4, 5, 6]  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+    dict(type='FDA', prob=0.2, amp_thred=0.001, img_dir='/data_zs/data/open_datasets/fusai_release/train/images', file='/data_zs/data/open_datasets/fusai_release/train/split.csv'),
     dict(type='AlbumentationAug'),
     dict(type='LabelEncode'),
     dict(type='Resize', img_scale=crop_size, ratio_range=(0.5, 2.0)),
@@ -78,17 +83,17 @@ train_pipeline = [
     dict(type='Collect', keys=['img', 'gt_semantic_seg'])
 ]
 # By default, models are trained on 8 GPUs with 2 images per GPU
-data=dict(samples_per_gpu=12,
-          workers_per_gpu=12,
+data=dict(samples_per_gpu=22,
+          workers_per_gpu=22,
           train=dict(pipeline=train_pipeline))
 
-runner = dict(type='IterBasedRunner', max_iters=80000)
+runner = dict(type='IterBasedRunner', max_iters=30000)
 
 optimizer_config = dict(type='Fp16OptimizerHook', loss_scale=512.)
 # fp16 placeholder
 fp16 = dict()
-checkpoint_config = dict(by_epoch=False, interval=10000, max_keep_ckpts=3)
-evaluation = dict(interval=10000, metric='FWIoU', save_best='FWIoU', greater_keys='FWIoU')
+checkpoint_config = dict(by_epoch=False, interval=5000, max_keep_ckpts=3)
+evaluation = dict(interval=5000, metric='FWIoU', save_best='FWIoU', greater_keys='FWIoU')
 # evaluation = dict(interval=10000, metric='mIoU', pre_eval=True)
 
-name = 'convnext_tiny_80k_b12_ce_augv2'
+name = 'convnext_tiny_40k_b22_poly_Softce_fda-cutreplace-classmix14_fold0'

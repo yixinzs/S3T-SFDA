@@ -59,27 +59,35 @@ optimizer = dict(
             ))
 
 
-lr_config = dict(_delete_=True, policy='poly',
+# lr_config = dict(_delete_=True, policy='poly',
+#                  warmup='linear',
+#                  warmup_iters=1500,
+#                  warmup_ratio=1e-6,
+#                  power=1.0, min_lr=0.0, by_epoch=False)
+
+lr_config = dict(_delete_=True, policy='SWAPolyRestart',
                  warmup='linear',
-                 warmup_iters=1500,
+                 warmup_iters=1500,   #1500   #20
                  warmup_ratio=1e-6,
-                 power=1.0, min_lr=0.0, by_epoch=False)
+                 restart_ratio=0.75,
+                 restart_step=5,
+                 min_lr=0.0, by_epoch=False)
 
 img_norm_cfg = dict(
     mean=[61.455, 64.868, 74.614], std=[32.379, 35.219, 42.206], to_rgb=False)  #True
 train_pipeline = [
     dict(type='LoadImageFromFileCustom'),
     dict(type='LoadAnnotationsCustom'),    #, reduce_zero_label=True
-    # dict(type='ClassMixFDA', prob=0.5, small_class=[1, 2, 3, 4, 5, 6, 7, 8], amp_thred=0.006, file='/data_zs/output/rsipac/config/small_class_with_samples_512x512_fold0.json'),   #[1, 3, 4, 5, 6]
+    dict(type='CutReplace', prob=0.5, img_dir='/data_zs/data/open_datasets/fusai_release/train/images', lbl_dir='/data_zs/data/open_datasets/fusai_release/train/labels', file='/workspace/mmsegmentation_rsipac/data_config/artificial_forest.csv'),
+    dict(type='ClassMixFDA', prob=1, small_class=[14], amp_thred=0.001, file='/workspace/mmsegmentation_rsipac/data_config/sample_small26214-52428_class_stats_512x512_fold0.json'),   #[1, 3, 4, 5, 6]  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+    dict(type='FDA', prob=0.2, amp_thred=0.001, img_dir='/data_zs/data/open_datasets/fusai_release/train/images', file='/workspace/mmsegmentation_rsipac/data_config/split.csv'),
     dict(type='AlbumentationAug'),
     dict(type='LabelEncode'),
-    # dict(type='Resize', img_scale=crop_size, ratio_range=(0.5, 2.0)),
-    dict(type='RandomCrop', crop_size=(384, 384), cat_max_ratio=0.75),  #crop_size
-    dict(type='Resize', ratio_range=(1.25, 1.25)),
+    dict(type='RandomCrop', crop_size=(448, 448), cat_max_ratio=0.75),   #crop_size  (448, 448)  (384, 384)  (448, 448)
+    dict(type='Resize', ratio_range=(1.25, 1.25)),   #(1.25, 1.25)   (1.5, 1.5)
     dict(type='RandomFlip', prob=0.5, direction='horizontal'),
     dict(type='RandomFlip', prob=0.5, direction='vertical'),
     dict(type='PhotoMetricDistortion'),
-    # dict(type='PhotoMetricDistortion'),
     dict(type='Normalize', **img_norm_cfg),
     # dict(type='Pad', size=crop_size, pad_val=0, seg_pad_val=255),
     dict(type='DefaultFormatBundle'),
@@ -90,8 +98,7 @@ test_pipeline = [
     dict(type='LoadImageFromFileCustom'),
     dict(
         type='MultiScaleFlipAug',
-        # img_scale=(512, 512),
-        img_scale=None,
+        img_scale=(512, 512),
         img_ratios=1.25,
         # img_ratios=[0.5, 0.75, 1.0, 1.25, 1.5, 1.75],
         flip=False,
@@ -106,8 +113,8 @@ test_pipeline = [
 ]
 
 # By default, models are trained on 8 GPUs with 2 images per GPU
-data=dict(samples_per_gpu=12,
-          workers_per_gpu=12,
+data=dict(samples_per_gpu=10,
+          workers_per_gpu=10,
           train=dict(pipeline=train_pipeline),
           val=dict(pipeline=test_pipeline),
           test=dict(pipeline=test_pipeline))
@@ -117,8 +124,14 @@ runner = dict(type='IterBasedRunner', max_iters=80000)
 optimizer_config = dict(type='Fp16OptimizerHook', loss_scale=512.)
 # fp16 placeholder
 fp16 = dict()
-checkpoint_config = dict(by_epoch=False, interval=10000, max_keep_ckpts=3)
+checkpoint_config = dict(by_epoch=False, interval=10000, max_keep_ckpts=1)
 evaluation = dict(interval=10000, metric='FWIoU', save_best='FWIoU', greater_keys='FWIoU')
 # evaluation = dict(interval=10000, metric='mIoU', pre_eval=True)
 
-name = 'convnext_small_80k_b12_Softce_augv2-s1.25'
+custom_hooks = [dict(
+                    type='SWAHook',
+                    swa_start_ratio=0.75,
+                    swa_restart_step=5,
+                    )]
+
+name = 'small_80k_poly_Softce_fda-cutreplace-classmix14_448s1.25p10_fold0'
