@@ -26,7 +26,7 @@
       <paths name="root@10.1.11.56:3005">
         <serverdata>
           <mappings>
-            <mapping deploy="/data_zs/code/loveDA/mmsegmentation_domain" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/data_zs/code/source_free_da/mmsegmentation_sfda" local="$PROJECT_DIR$" web="/" />
           </mappings>
         </serverdata>
       </paths>
@@ -51,6 +51,69 @@
           </mappings>
         </serverdata>
       </paths>
+      <paths name="root@10.1.11.56:3009">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="root@10.1.11.56:3011">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="root@10.1.11.56:3012">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="root@10.1.11.56:3013">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="root@10.1.11.56:3014">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="root@100.69.229.69:3004">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="root@100.69.229.69:3010">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="root@100.69.229.69:3011">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="root@100.69.229.69:3014">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
       <paths name="root@127.0.0.1:12392">
         <serverdata>
           <mappings>
@@ -65,6 +128,13 @@
           </mappings>
         </serverdata>
       </paths>
+      <paths name="root@127.0.0.1:12394">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
       <paths name="root@127.0.0.1:12395">
         <serverdata>
           <mappings>
@@ -72,7 +142,21 @@
           </mappings>
         </serverdata>
       </paths>
+      <paths name="root@127.0.0.1:12396">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
       <paths name="root@127.0.0.1:12397">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="root@127.0.0.1:12398">
         <serverdata>
           <mappings>
             <mapping local="$PROJECT_DIR$" web="/" />

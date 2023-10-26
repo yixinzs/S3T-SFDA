@@ -1,6 +1,6 @@
 # Obtained from: https://github.com/open-mmlab/mmsegmentation/tree/v0.16.0
 # Modifications: Support for seg_weight
-
+import warnings
 from abc import ABCMeta, abstractmethod
 
 import torch
@@ -52,6 +52,7 @@ class DACSBaseDecodeHead(BaseModule, metaclass=ABCMeta):
                  *,
                  num_classes,
                  dropout_ratio=0.1,
+                 out_channels=None,
                  conv_cfg=None,
                  norm_cfg=None,
                  act_cfg=dict(type='ReLU'),
@@ -79,6 +80,23 @@ class DACSBaseDecodeHead(BaseModule, metaclass=ABCMeta):
         # self.loss_decode = build_loss(loss_decode)
         self.ignore_index = ignore_index
         self.align_corners = align_corners
+
+        if out_channels is None:
+            if num_classes == 2:
+                warnings.warn('For binary segmentation, we suggest using'
+                              '`out_channels = 1` to define the output'
+                              'channels of segmentor, and use `threshold`'
+                              'to convert seg_logist into a prediction'
+                              'applying a threshold')
+            out_channels = num_classes
+
+        if out_channels != num_classes and out_channels != 1:
+            raise ValueError(
+                'out_channels should be equal to num_classes,'
+                'except binary segmentation set out_channels == 1 and'
+                f'num_classes == 2, but got out_channels={out_channels}'
+                f'and num_classes={num_classes}')
+        self.out_channels = out_channels
 
         if isinstance(loss_decode, dict):
             self.loss_decode = build_loss(loss_decode)

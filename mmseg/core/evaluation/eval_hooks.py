@@ -42,28 +42,12 @@ class EvalHook(_EvalHook):
                 'with ``pre_eval=True`` as argument for ``single_gpu_test()`` '
                 'function')
 
-    # def _do_evaluate(self, runner):
-    #     """perform evaluation and save ckpt."""
-    #     if not self._should_evaluate(runner):
-    #         return
-    #
-    #     from mmseg.apis import single_gpu_test
-    #     results = single_gpu_test(
-    #         runner.model, self.dataloader, show=False, pre_eval=self.pre_eval)
-    #     self.latest_results = results
-    #     runner.log_buffer.clear()
-    #     runner.log_buffer.output['eval_iter_num'] = len(self.dataloader)
-    #     key_score = self.evaluate(runner, results)
-    #     if self.save_best:
-    #         self._save_ckpt(runner, key_score)
-
-
     def _do_evaluate(self, runner):
         """perform evaluation and save ckpt."""
         if not self._should_evaluate(runner):
             return
 
-        from mmseg_custom.apis import single_gpu_test
+        from mmseg.apis import single_gpu_test
         results = single_gpu_test(
             runner.model, self.dataloader, show=False, pre_eval=self.pre_eval)
         self.latest_results = results
@@ -71,7 +55,23 @@ class EvalHook(_EvalHook):
         runner.log_buffer.output['eval_iter_num'] = len(self.dataloader)
         key_score = self.evaluate(runner, results)
         if self.save_best:
-            self.save_ckpt_custom(runner, key_score)
+            self._save_ckpt(runner, key_score)
+
+
+    # def _do_evaluate(self, runner):
+    #     """perform evaluation and save ckpt."""
+    #     if not self._should_evaluate(runner):
+    #         return
+    #
+    #     from mmseg_custom.apis import single_gpu_test
+    #     results = single_gpu_test(
+    #         runner.model, self.dataloader, show=False, pre_eval=self.pre_eval)
+    #     self.latest_results = results
+    #     runner.log_buffer.clear()
+    #     runner.log_buffer.output['eval_iter_num'] = len(self.dataloader)
+    #     key_score = self.evaluate(runner, results)
+    #     if self.save_best:
+    #         self.save_ckpt_custom(runner, key_score)
 
     def save_ckpt_custom(self, runner, key_score):
         """Save the best checkpoint.

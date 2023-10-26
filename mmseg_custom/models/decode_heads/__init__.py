@@ -6,6 +6,7 @@ from .segformer_head import SegFormerHead
 from .daformer_head import DAFormerHead
 from .dacs_decode_head import DACSBaseDecodeHead
 from .hrda_head import HRDAHead
+from .dlv2_head import DLV2Head
 
 __all__ = ['GNUPerHead',
            'ContrastUPerHead',
@@ -14,4 +15,5 @@ __all__ = ['GNUPerHead',
            'SegFormerHead',
            'DAFormerHead',
            'DACSBaseDecodeHead',
-           'HRDAHead']
+           'HRDAHead',
+           'DLV2Head']

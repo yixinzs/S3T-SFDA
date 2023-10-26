@@ -28,18 +28,22 @@ class MLP(nn.Module):
         return x
 
 
-# @HEADS.register_module()
+@HEADS.register_module()
 class SegFormerHead(BaseDecodeHead):
     """
     SegFormer: Simple and Efficient Design for Semantic Segmentation with
     Transformers
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self,
+                 decoder_params=dict(
+                     embed_dim=768, conv_kernel_size=1
+                 ),
+                 **kwargs):
         super(SegFormerHead, self).__init__(
             input_transform='multiple_select', **kwargs)
 
-        decoder_params = kwargs['decoder_params']
+        # decoder_params = kwargs['decoder_params']
         embedding_dim = decoder_params['embed_dim']
         conv_kernel_size = decoder_params['conv_kernel_size']
 

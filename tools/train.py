@@ -30,8 +30,8 @@ from mmseg.utils import (collect_env, get_device, get_root_logger,
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a segmentor')
-    parser.add_argument('--config', default='/data_zs/code/loveDA/mmsegmentation_domain/configs_custom/daformer/rural2urban_uda_advseg_daformer.py', help='train config file path')
-    parser.add_argument('--work-dir', default='/data_zs/output/loveDA_uda/rural2urban_uda_advseg_daformer_0227', help='the dir to save logs and models')
+    parser.add_argument('--config', default='/data_zs/code/source_free_da/mmsegmentation_sfda/configs_custom/sfda/sfda_gta2cityscpaes_daformer.py', help='train config file path')
+    parser.add_argument('--work-dir', default='/data_zs/code/source_free_da/mmsegmentation_sfda/work_dirs/sfda_gta_daformer_mitb5_512x512_b4_debug', help='the dir to save logs and models')
     parser.add_argument(
         '--load-from', help='the checkpoint file to load weights from')
     parser.add_argument(
@@ -56,7 +56,7 @@ def parse_args():
     group_gpus.add_argument(
         '--gpu-id',
         type=int,
-        default=1,
+        default=0,
         help='id of gpu to use '
         '(only applicable to non-distributed training)')
     parser.add_argument('--seed', type=int, default=42, help='random seed')  #None

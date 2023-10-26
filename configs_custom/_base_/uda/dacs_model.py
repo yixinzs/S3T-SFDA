@@ -9,7 +9,7 @@ baseline = dict(
         in_index=[0, 1, 2, 3],
         channels=256,
         dropout_ratio=0.1,
-        num_classes=14,
+        num_classes=7,
         norm_cfg=dict(type='BN', requires_grad=True),
         align_corners=False,
         decoder_params=dict(

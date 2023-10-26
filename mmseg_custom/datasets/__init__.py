@@ -5,8 +5,13 @@ from .custom_base import CustomBaseDataset
 from .rsipac import RSIPACDataset
 from .loveda import LOVEDADataset
 from .uda_dataset import UDADataset
+from .gta import GTADataset
+from .sfda_dataset import SFDADataset
+
 __all__ = ['MapillaryDataset',
            'CustomBaseDataset',
            'RSIPACDataset',
            'LOVEDADataset',
-           'UDADataset']   #, 'CustomBaseDataset', 'RSIPACDataset'
+           'GTADataset',
+           'UDADataset',
+           'SFDADataset']   #, 'CustomBaseDataset', 'RSIPACDataset'
