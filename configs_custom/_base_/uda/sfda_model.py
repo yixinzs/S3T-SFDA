@@ -1,6 +1,6 @@
 
-model = dict(
-    type='SFDAEncoderDecoder',
+baseline = dict(
+    type='EncoderDecoder',
     pretrained='/data_zs/data/pretrained_models/mit_b5.pth',
     backbone=dict(type='mit_b5', style='pytorch'),
     decode_head=dict(
@@ -27,3 +27,18 @@ model = dict(
             type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1)),
     train_cfg=dict(),
     test_cfg=dict(mode='whole'))
+
+model = dict(
+    type='SFDAEncoderDecoder',
+    dtu_dynamic=True,
+    query_step=3,
+    query_start=9,
+    meta_max_update=30,
+    ema_weight=0.99,
+    proxy_metric='SND',
+    fix_iteration=12,
+    topk_candidate=0.5,
+    update_frequency=3000,
+    threshold_beta=0.001,
+    model=baseline
+)

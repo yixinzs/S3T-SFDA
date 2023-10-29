@@ -2,6 +2,13 @@
 <project version="4">
   <component name="PublishConfigData" autoUpload="Always" serverName="root@10.1.11.56:3005">
     <serverData>
+      <paths name="root@10.1.11.56:1234">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
       <paths name="root@10.1.11.56:12392">
         <serverdata>
           <mappings>
@@ -90,6 +97,13 @@
         <serverdata>
           <mappings>
             <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="root@100.69.229.69:3005">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/data_zs/code/source_free_da/mmsegmentation_sfda" local="$PROJECT_DIR$" />
           </mappings>
         </serverdata>
       </paths>

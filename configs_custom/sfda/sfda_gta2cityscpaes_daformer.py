@@ -11,17 +11,13 @@ _base_ = [
 # Random Seed
 seed = 0
 
+resume = '/data_zs/code/source_free_da/mmsegmentation_sfda/work_dirs/onlysource_gta_daformer_mitb5_512x512_b4_pmd/best_mIoU_iter_38000.pth'
 model = dict(
-    pretrained='/data_zs/data/pretrained_models/mit_b5.pth',   #'pretrained/mit_b5.pth'
-    backbone=dict(type='mit_b5', style='pytorch'),
-    decode_head=dict(
-        type='DAFormerHead',
-        in_channels=[64, 128, 320, 512],
-        num_classes=19,   #7  #19
-        loss_decode=dict(type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1)),  #'CrossEntropyLoss'  FocalLoss:use_sigmoid需为True  DiceLoss  #dict(type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.0)
+    resume_file=resume,
     )
 
 # Optimizer Hyperparameters
+optimizer_config = None
 optimizer = dict(
     type='AdamW',
     lr=6e-05,
@@ -43,10 +39,10 @@ lr_config = dict(
 runner = dict(type='IterBasedRunner', max_iters=40000)
 # runner = dict(type='EpochBasedRunner', max_epochs=160)
 # Logging Configuration
-checkpoint_config = dict(by_epoch=False, interval=2000, max_keep_ckpts=5)  #False 40000
+checkpoint_config = dict(by_epoch=False, interval=2000, max_keep_ckpts=3)  #False 40000
 evaluation = dict(interval=2000, metric='mIoU', save_best='mIoU')  #, pre_eval=True
 
 # evaluation = dict(interval=100, metric='mIoU')   #4000
 # Meta Information for Result Analysis
-name = 'sfda_gta_daformer_mitb5_512x512_b4_debug'
+name = 'sfda_gta_daformer_mitb5_512x512_b4_dtu'
 

@@ -1,15 +1,182 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+from copy import deepcopy
+import numpy as np
+import pandas as pd
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from mmcv.parallel import MMDistributedDataParallel
 
 from mmseg.core import add_prefix
 from mmseg.ops import resize
 
 from mmseg.models import builder
-from mmseg.models.builder import SEGMENTORS
+from mmseg.models.builder import SEGMENTORS, build_segmentor
 from mmseg.models.segmentors.base import BaseSegmentor
 
+from mmcv_custom.checkpoint import load_checkpoint
+from mmseg.ops import resize
+
+def get_module(module):
+    """Get `nn.ModuleDict` to fit the `MMDistributedDataParallel` interface.
+
+    Args:
+        module (MMDistributedDataParallel | nn.ModuleDict): The input
+            module that needs processing.
+
+    Returns:
+        nn.ModuleDict: The ModuleDict of multiple networks.
+    """
+    if isinstance(module, MMDistributedDataParallel):
+        return module.module
+
+    return module
+
+def soft_label_cross_entropy(pred, soft_label, pixel_weights=None):
+    N, C, H, W = pred.shape
+    loss = -soft_label.float()*F.log_softmax(pred, dim=1)
+    if pixel_weights is None:
+        return torch.mean(torch.sum(loss, dim=1))
+    return torch.mean(pixel_weights*torch.sum(loss, dim=1))
+
+
+
+def pseudo_labels_probs(probs, running_conf, THRESHOLD_BETA, RUN_CONF_UPPER=0.80, ignore_augm=None,
+                        discount=True):  # 查da-sac的公式2-公式5
+    """Consider top % pixel w.r.t. each image"""
+
+    RUN_CONF_UPPER = RUN_CONF_UPPER
+    RUN_CONF_LOWER = 0.20
+
+    B, C, H, W = probs.size()
+    max_conf, max_idx = probs.max(1, keepdim=True)  # B,1,H,W
+
+    probs_peaks = torch.zeros_like(probs)
+    probs_peaks.scatter_(1, max_idx, max_conf)  # B,C,H,W
+    top_peaks, _ = probs_peaks.view(B, C, -1).max(-1)  # B,C
+
+    # top_peaks 是一张图上每个类的最大置信度
+    top_peaks *= RUN_CONF_UPPER
+
+    if discount:
+        # discount threshold for long-tail classes
+        top_peaks *= (1. - torch.exp(- running_conf / THRESHOLD_BETA)).view(1, C)  #
+
+    top_peaks.clamp_(RUN_CONF_LOWER)  # in-place
+    probs_peaks.gt_(top_peaks.view(B, C, 1, 1))
+
+    # ignore if lower than the discounted peaks
+    ignore = probs_peaks.sum(1, keepdim=True) != 1
+
+    # thresholding the most confident pixels
+    pseudo_labels = max_idx.clone()
+    pseudo_labels[ignore] = 255  #
+
+    pseudo_labels = pseudo_labels.squeeze(1)
+    # pseudo_labels[ignore_augm] = 255
+
+    return pseudo_labels, max_conf, max_idx
+
+
+
+def update_running_conf(probs, running_conf, THRESHOLD_BETA, tolerance=1e-8):
+    """Maintain the moving class prior"""
+    STAT_MOMENTUM = 0.9
+
+    B, C, H, W = probs.size()
+    probs_avg = probs.mean(0).view(C, -1).mean(-1)
+
+    # updating the new records: copy the value
+    update_index = probs_avg > tolerance
+    new_index = update_index & (running_conf == THRESHOLD_BETA)
+    running_conf[new_index] = probs_avg[new_index]
+
+    # use the moving average for the rest (Eq. 2)
+    running_conf *= STAT_MOMENTUM
+    running_conf += (1 - STAT_MOMENTUM) * probs_avg
+    return running_conf
+
+def full2weak(feats, img_metas, down_ratio=1, nearest=False):
+    tmp = []
+    for i in range(feats.shape[0]):
+        # print('---------------------:{}'.format(img_metas))
+        #### rescale
+        w, h = img_metas[i]['scale'][0], img_metas[i]['scale'][1]
+        if nearest:
+            feat_ = F.interpolate(feats[i:i+1], size=[int(h/down_ratio), int(w/down_ratio)])
+        else:
+            feat_ = F.interpolate(feats[i:i+1], size=[int(h/down_ratio), int(w/down_ratio)], mode='bilinear', align_corners=True)
+        #### then crop
+        y1, y2, x1, x2 = img_metas[i]['crop_bbox'][0], img_metas[i]['crop_bbox'][1], img_metas[i]['crop_bbox'][2], img_metas[i]['crop_bbox'][3]
+        y1, th, x1, tw = int(y1/down_ratio), int((y2-y1)/down_ratio), int(x1/down_ratio), int((x2-x1)/down_ratio)
+        feat_ = feat_[:, :, y1:y1+th, x1:x1+tw]
+        if img_metas[i]['flip']:
+            if img_metas[i]['flip_direction'] == 'horizontal':
+                inv_idx = torch.arange(feat_.size(3)-1,-1,-1).long().to(feat_.device)
+                feat_ = feat_.index_select(3,inv_idx)
+            elif img_metas[i]['flip_direction'] == 'vertical':
+                inv_idx = torch.arange(feat_.size(2) - 1, -1, -1).long().to(feat_.device)
+                feat_ = feat_.index_select(2, inv_idx)
+        tmp.append(feat_)
+    feat = torch.cat(tmp, 0)
+    return feat
+
+
+
+def entropy(p, prob=True, mean=True):
+    if prob:
+        p = F.softmax(p, dim=1)
+    en = -torch.sum(p * torch.log(p + 1e-5), 1)
+    if mean:
+        return torch.mean(en)
+    else:
+        return en
+
+
+class BinaryCrossEntropy(torch.nn.Module):
+
+    def __init__(self, size_average=True, ignore_index=255):
+        super(BinaryCrossEntropy, self).__init__()
+        self.size_average = size_average
+        self.ignore_label = ignore_index
+
+    def forward(self, predict, target, weight=None):
+        """
+            Args:
+                predict:(n, 1, h, w)
+                target:(n, h, w)
+                weight (Tensor, optional): a manual rescaling weight given to each class.
+                                           If given, has to be a Tensor of size "nclasses"
+        """
+        assert not target.requires_grad
+        assert predict.dim() == 4
+        assert target.dim() == 3
+        assert predict.size(0) == target.size(0), "{0} vs {1} ".format(predict.size(0), target.size(0))
+        assert predict.size(2) == target.size(1), "{0} vs {1} ".format(predict.size(2), target.size(1))
+        assert predict.size(3) == target.size(2), "{0} vs {1} ".format(predict.size(3), target.size(3))
+        n, c, h, w = predict.size()
+        target_mask = (target >= 0) * (target != self.ignore_label)
+        target = target[target_mask]
+        if not target.data.dim():
+            return torch.zeros(1)
+        predict = predict.transpose(1, 2).transpose(2, 3).contiguous()
+        predict = predict[target_mask.view(n, h, w, 1).repeat(1, 1, 1, c)].view(-1, c)
+        loss = F.binary_cross_entropy_with_logits(predict, target.unsqueeze(-1), pos_weight=weight, size_average=self.size_average)
+        return loss
+
+class WeightEMA(object):
+    def __init__(self, params, src_params, alpha):
+        self.params = list(params)
+        self.src_params = list(src_params)
+        self.alpha = alpha
+
+    def step(self):
+        one_minus_alpha = 1.0 - self.alpha
+        for p, src_p in zip(self.params, self.src_params):
+            p.data.mul_(self.alpha)
+            p.data.add_(src_p.data * one_minus_alpha)
 
 @SEGMENTORS.register_module()
 class SFDAEncoderDecoder(BaseSegmentor):
@@ -20,106 +187,132 @@ class SFDAEncoderDecoder(BaseSegmentor):
     which could be dumped during inference.
     """
 
-    def __init__(self,
-                 backbone,
-                 decode_head,
-                 neck=None,
-                 auxiliary_head=None,
-                 train_cfg=None,
-                 test_cfg=None,
-                 pretrained=None,
-                 init_cfg=None):
-        super(SFDAEncoderDecoder, self).__init__(init_cfg)
-        if pretrained is not None:
-            assert backbone.get('pretrained') is None, \
-                'both backbone and segmentor set pretrained weight'
-            backbone.pretrained = pretrained
-        self.backbone = builder.build_backbone(backbone)
-        if neck is not None:
-            self.neck = builder.build_neck(neck)
-        self._init_decode_head(decode_head)
-        self._init_auxiliary_head(auxiliary_head)
+    def __init__(self, **cfg):
+        super(SFDAEncoderDecoder, self).__init__()
+        # if pretrained is not None:
+        #     assert backbone.get('pretrained') is None, \
+        #         'both backbone and segmentor set pretrained weight'
+        #     backbone.pretrained = pretrained
+        self.local_iter = 0
+        self.dtu_dynamic = cfg['dtu_dynamic']
+        self.dtu_query_step = cfg['query_step']
+        self.dtu_query_start = cfg['query_start']
+        self.dtu_meta_max_update = cfg['meta_max_update']
+        self.dtu_proxy_metric = cfg['proxy_metric']
+        self.dtu_ema_weight = cfg['ema_weight']
+        self.dtu_fix_iteration = cfg['fix_iteration']
+        self.topk_candidate = cfg['topk_candidate']
+        self.update_frequency = cfg['update_frequency']
+        self.threshold_beta = cfg['threshold_beta']
 
-        self.train_cfg = train_cfg
-        self.test_cfg = test_cfg
 
-        assert self.with_decode_head
+        model = build_segmentor(deepcopy(cfg['model']))
+        self.model = get_module(model)
+        # print('-------------resume_file:{}'.format(cfg['resume_file']))
+        load_checkpoint(self.model, cfg['resume_file'])
 
-    def _init_decode_head(self, decode_head):
-        """Initialize ``decode_head``"""
-        self.decode_head = builder.build_head(decode_head)
-        self.align_corners = self.decode_head.align_corners
-        self.num_classes = self.decode_head.num_classes
-        self.out_channels = self.decode_head.out_channels
+        ema_model = build_segmentor(deepcopy(cfg['model']))
+        self.ema_model =get_module(ema_model)
 
-    def _init_auxiliary_head(self, auxiliary_head):
-        """Initialize ``auxiliary_head``"""
-        if auxiliary_head is not None:
-            if isinstance(auxiliary_head, list):
-                self.auxiliary_head = nn.ModuleList()
-                for head_cfg in auxiliary_head:
-                    self.auxiliary_head.append(builder.build_head(head_cfg))
+        self.binary_ce = BinaryCrossEntropy(ignore_index=255)
+
+        self.running_conf = torch.zeros(self.model.decode_head.num_classes).cuda() #TODO:确认是否需要加cuda(),或者是否可以把running_conf分布到多卡上
+        self.running_conf.fill_(self.threshold_beta)
+        if self.dtu_dynamic:
+            self.stu_eval_list = []
+            self.stu_score_buffer = []
+            self.res_dict = {'stu_ori': [], 'stu_now': [], 'update_iter': []}
+
+        self.ema_model_optimizer = WeightEMA(list(self.ema_model.parameters()), list(self.model.parameters()), self.dtu_ema_weight)
+
+    def _init_ema_weights(self):
+        for param in self.ema_model.parameters():
+            param.detach_()
+        mp = list(self.model.parameters())
+        mcp = list(self.ema_model.parameters())
+        for i in range(0, len(mp)):
+            if not mcp[i].data.shape:  # scalar tensor
+                mcp[i].data = mp[i].data.clone()   #初始化，直接将权重赋给动量编码器
             else:
-                self.auxiliary_head = builder.build_head(auxiliary_head)
+                mcp[i].data[:] = mp[i].data[:].clone()
 
     def extract_feat(self, img):
         """Extract features from images."""
-        x = self.backbone(img)
-        if self.with_neck:
-            x = self.neck(x)
-        return x
+        return self.model.extract_feat(img)
 
     def encode_decode(self, img, img_metas):
         """Encode images with backbone and decode into a semantic segmentation
         map of the same size as input."""
-        x = self.extract_feat(img)
-        out = self._decode_head_forward_test(x, img_metas)
-        out = resize(
-            input=out,
-            size=img.shape[2:],
-            mode='bilinear',
-            align_corners=self.align_corners)
-        return out
+        return self.model.encode_decode(img, img_metas)
 
-    def _decode_head_forward_train(self, x, img_metas, gt_semantic_seg):
-        """Run forward function and calculate loss for decode head in
-        training."""
-        losses = dict()
-        loss_decode = self.decode_head.forward_train(x, img_metas,
-                                                     gt_semantic_seg,
-                                                     self.train_cfg)
 
-        losses.update(add_prefix(loss_decode, 'decode'))
-        return losses
-
-    def _decode_head_forward_test(self, x, img_metas):
-        """Run forward function and calculate loss for decode head in
-        inference."""
-        seg_logits = self.decode_head.forward_test(x, img_metas, self.test_cfg)
-        return seg_logits
-
-    def _auxiliary_head_forward_train(self, x, img_metas, gt_semantic_seg):
-        """Run forward function and calculate loss for auxiliary head in
-        training."""
-        losses = dict()
-        if isinstance(self.auxiliary_head, nn.ModuleList):
-            for idx, aux_head in enumerate(self.auxiliary_head):
-                loss_aux = aux_head.forward_train(x, img_metas,
-                                                  gt_semantic_seg,
-                                                  self.train_cfg)
-                losses.update(add_prefix(loss_aux, f'aux_{idx}'))
-        else:
-            loss_aux = self.auxiliary_head.forward_train(
-                x, img_metas, gt_semantic_seg, self.train_cfg)
-            losses.update(add_prefix(loss_aux, 'aux'))
-
-        return losses
 
     def forward_dummy(self, img):
         """Dummy forward function."""
         seg_logit = self.encode_decode(img, None)
 
         return seg_logit
+
+    def evel_stu(self, stu_eval_list, dtu_proxy_metric):
+        eval_result = []
+        # self.eval()
+        with torch.no_grad():
+            for i, (x, permute_index) in enumerate(stu_eval_list):
+                # print('------------------------i:{},x:{},permute_index:{}'.format(i, x.shape, permute_index))
+                output = self.model.decode_head.forward(self.model.extract_feat(x.cuda()))
+                output = resize(input=output, size=x.shape[2:], mode='bilinear', align_corners=self.model.align_corners)
+                output = F.softmax(output, dim=1)
+                if dtu_proxy_metric == 'ENT':
+                    out_max_prob = output.max(1)[0]
+                    uc_map_prob = 1 - (-torch.mul(out_max_prob, torch.log2(out_max_prob)) * 2)
+                    eval_result.append(uc_map_prob.mean().item())
+                elif dtu_proxy_metric == 'SND':
+                    pred1 = output.permute(0, 2, 3, 1)
+                    pred1 = pred1.reshape(-1, pred1.size(3))
+                    pred1_rand = permute_index
+                    # select_point = pred1_rand.shape[0]
+                    select_point = 100
+                    pred1 = F.normalize(pred1[pred1_rand[:select_point]])
+                    pred1_en = entropy(torch.matmul(pred1, pred1.t()) * 20)
+                    eval_result.append(pred1_en.item())
+        # self.train()
+        return eval_result
+
+    def train_step(self, data_batch, optimizer, **kwargs):
+        """The iteration step during training.
+
+        This method defines an iteration step during training, except for the
+        back propagation and optimizer updating, which are done in an optimizer
+        hook. Note that in some complicated cases or models, the whole process
+        including back propagation and optimizer updating is also defined in
+        this method, such as GAN.
+
+        Args:
+            data (dict): The output of dataloader.
+            optimizer (:obj:`torch.optim.Optimizer` | dict): The optimizer of
+                runner is passed to ``train_step()``. This argument is unused
+                and reserved.
+
+        Returns:
+            dict: It should contain at least 3 keys: ``loss``, ``log_vars``,
+                ``num_samples``.
+                ``loss`` is a tensor for back propagation, which can be a
+                weighted sum of multiple losses.
+                ``log_vars`` contains all the variables to be sent to the
+                logger.
+                ``num_samples`` indicates the batch size (when the model is
+                DDP, it means the batch size on each GPU), which is used for
+                averaging the logs.
+        """
+
+        optimizer.zero_grad()
+        log_vars = self(**data_batch)
+        optimizer.step()
+
+        log_vars.pop('loss', None)  # remove the unnecessary 'loss'
+        outputs = dict(
+            log_vars=log_vars, num_samples=len(data_batch['img_metas']))
+        return outputs
 
     def forward_train(self,
                       img,
@@ -141,92 +334,102 @@ class SFDAEncoderDecoder(BaseSegmentor):
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
+        log_vars = {}
 
-        x = self.extract_feat(img)
+        if self.local_iter == 0:
+            self._init_ema_weights()
 
-        losses = dict()
+        x = self.model.extract_feat(img)
+        target_pred = self.model.decode_head.forward(x)
+        target_pred = resize(input=target_pred, size=img.shape[2:], mode='bilinear', align_corners=self.model.align_corners)
+        if self.dtu_dynamic:
+            with torch.no_grad():
+                x_full = self.model.extract_feat(img_full.detach())
+                target_pred_full = self.model.decode_head.forward(x_full)
+                target_pred_full = resize(input=target_pred_full, size=img_full.shape[2:], mode='bilinear', align_corners=self.model.align_corners)
+                output = F.softmax(target_pred_full.clone().detach(), dim=1).detach()
+                if self.dtu_proxy_metric == 'ENT':
+                    out_max_prob = output.max(1)[0]
+                    uc_map_prob = 1 - (-torch.mul(out_max_prob, torch.log2(out_max_prob)) * 2)
+                    self.stu_score_buffer.append(uc_map_prob.mean().item())
+                    self.stu_eval_list.append([img_full.clone().detach().cpu()])
+                elif self.dtu_proxy_metric == 'SND':
+                    pred1 = output.permute(0, 2, 3, 1)
+                    pred1 = pred1.reshape(-1, pred1.size(3))
+                    pred1_rand = torch.randperm(pred1.size(0))
+                    # select_point = pred1_rand.shape[0]
+                    select_point = 100
+                    pred1 = F.normalize(pred1[pred1_rand[:select_point]])
+                    pred1_en = entropy(torch.matmul(pred1, pred1.t()) * 20)
+                    self.stu_score_buffer.append(pred1_en.item())
+                    self.stu_eval_list.append([img_full.clone().detach().cpu(), pred1_rand.cpu()])
+                else:
+                    print('no support')
+                    return
 
-        loss_decode = self._decode_head_forward_train(x, img_metas,
-                                                      gt_semantic_seg)
-        losses.update(loss_decode)
+        with torch.no_grad():
 
-        if self.with_auxiliary_head:
-            loss_aux = self._auxiliary_head_forward_train(
-                x, img_metas, gt_semantic_seg)
-            losses.update(loss_aux)
+            size = img_full.shape[-2:]
+            ema_x_full = self.ema_model.extract_feat(img_full.detach())
+            ema_target_pred_full = self.ema_model.decode_head.forward(ema_x_full)
+            ema_target_pred_full = resize(input=ema_target_pred_full, size=img_full.shape[2:], mode='bilinear', align_corners=self.model.align_corners)
+            ema_target_prob = F.softmax(full2weak(ema_target_pred_full, img_metas), dim=1)
 
-        return losses
+            # pos label
+            running_conf = update_running_conf(F.softmax(ema_target_pred_full, dim=1), self.running_conf, self.threshold_beta)
+            psd_label, _, _ = pseudo_labels_probs(ema_target_prob, running_conf, self.threshold_beta)
 
-    # TODO refactor
-    def slide_inference(self, img, img_meta, rescale):
-        """Inference by sliding-window with overlap.
+            b, c, h, w = ema_target_prob.size()
+            t_neg_label = ema_target_prob.clone().detach().view(b * c, h, w)
+            ema_target_prob = ema_target_prob.view(b * c, h, w)
+            thr = 1 / self.model.decode_head.num_classes
+            t_neg_label[ema_target_prob > thr] = 255
+            t_neg_label[ema_target_prob <= thr] = 0
 
-        If h_crop > h_img or w_crop > w_img, the small patch will be used to
-        decode without padding.
-        """
+            # label mix
+            # psd_label = psd_label * (mix_label == 255) + mix_label * ((mix_label != 255))
+            uc_map_eln = torch.ones_like(psd_label).float()
 
-        h_stride, w_stride = self.test_cfg.stride
-        h_crop, w_crop = self.test_cfg.crop_size
-        batch_size, _, h_img, w_img = img.size()
-        out_channels = self.out_channels
-        h_grids = max(h_img - h_crop + h_stride - 1, 0) // h_stride + 1
-        w_grids = max(w_img - w_crop + w_stride - 1, 0) // w_stride + 1
-        preds = img.new_zeros((batch_size, out_channels, h_img, w_img))
-        count_mat = img.new_zeros((batch_size, 1, h_img, w_img))
-        for h_idx in range(h_grids):
-            for w_idx in range(w_grids):
-                y1 = h_idx * h_stride
-                x1 = w_idx * w_stride
-                y2 = min(y1 + h_crop, h_img)
-                x2 = min(x1 + w_crop, w_img)
-                y1 = max(y2 - h_crop, 0)
-                x1 = max(x2 - w_crop, 0)
-                crop_img = img[:, :, y1:y2, x1:x2]
-                crop_seg_logit = self.encode_decode(crop_img, img_meta)
-                preds += F.pad(crop_seg_logit,
-                               (int(x1), int(preds.shape[3] - x2), int(y1),
-                                int(preds.shape[2] - y2)))
+        target_losses = dict()
+        # print('--------------------------target_pred:{}'.format(target_pred.shape))
+        # print('--------------------------psd_label:{}'.format(psd_label.shape))
+        st_loss = self.model.decode_head.losses(target_pred, psd_label.unsqueeze(1).long())
+        # pesudo_p_loss = (st_loss * (-(1 - uc_map_eln)).exp()).mean()  #TODO:删掉是否合理
+        pesudo_n_loss = self.binary_ce(target_pred.view(b * c, 1, h, w), t_neg_label) * 0.5  # 忽略255，专注于负样本，即t_neg_label[tgt_prob_his <= thr] = 0部分
+        target_losses['pesudo_neg.loss'] = pesudo_n_loss
+        target_losses.update(add_prefix(st_loss, 'decode'))
 
-                count_mat[:, :, y1:y2, x1:x2] += 1
-        assert (count_mat == 0).sum() == 0
-        if torch.onnx.is_in_onnx_export():
-            # cast count_mat to constant while exporting to ONNX
-            count_mat = torch.from_numpy(
-                count_mat.cpu().detach().numpy()).to(device=img.device)
-        preds = preds / count_mat
-        if rescale:
-            # remove padding area
-            resize_shape = img_meta[0]['img_shape'][:2]
-            preds = preds[:, :, :resize_shape[0], :resize_shape[1]]
-            preds = resize(
-                preds,
-                size=img_meta[0]['ori_shape'][:2],
-                mode='bilinear',
-                align_corners=self.align_corners,
-                warning=False)
-        return preds
+        losses, target_log_vars = self._parse_losses(target_losses)
+        log_vars.update(target_log_vars)
+        losses.backward()
 
-    def whole_inference(self, img, img_meta, rescale):
-        """Inference with full image."""
+        if self.dtu_dynamic:
+            if len(self.stu_score_buffer) >= self.dtu_query_start and int(len(self.stu_score_buffer) - self.dtu_query_start) % self.dtu_query_step == 0:
+                all_score = self.evel_stu(self.stu_eval_list, self.dtu_proxy_metric)
+                compare_res = np.array(all_score) - np.array(self.stu_score_buffer)
+                if np.mean(compare_res > 0) > 0.5 or len(self.stu_score_buffer) > self.dtu_meta_max_update:
+                    update_iter = len(self.stu_score_buffer)
 
-        seg_logit = self.encode_decode(img, img_meta)
-        if rescale:
-            # support dynamic shape for onnx
-            if torch.onnx.is_in_onnx_export():
-                size = img.shape[2:]
-            else:
-                # remove padding area
-                resize_shape = img_meta[0]['img_shape'][:2]
-                seg_logit = seg_logit[:, :, :resize_shape[0], :resize_shape[1]]
-                size = img_meta[0]['ori_shape'][:2]
-            seg_logit = resize(
-                seg_logit,
-                size=size,
-                mode='bilinear',
-                align_corners=self.align_corners,
-                warning=False)
+                    self.ema_model_optimizer.step()
 
-        return seg_logit
+
+                    self.res_dict['stu_ori'].append(np.array(self.stu_score_buffer).mean())
+                    self.res_dict['stu_now'].append(np.array(all_score).mean())
+                    self.res_dict['update_iter'].append(update_iter)
+
+                    df = pd.DataFrame(self.res_dict)
+                    df.to_csv('dyIter_FN.csv')
+
+                    ## reset
+                    self.stu_eval_list = []
+                    self.stu_score_buffer = []
+        else:
+            if self.local_iter % self.dtu_fix_iteration == 0:
+                self.ema_model_optimizer.step()
+
+        self.local_iter += 1
+        return log_vars
+
 
     def inference(self, img, img_meta, rescale):
         """Inference with slide/whole style.
@@ -244,44 +447,12 @@ class SFDAEncoderDecoder(BaseSegmentor):
             Tensor: The output segmentation map.
         """
 
-        assert self.test_cfg.mode in ['slide', 'whole']
-        ori_shape = img_meta[0]['ori_shape']
-        assert all(_['ori_shape'] == ori_shape for _ in img_meta)
-        if self.test_cfg.mode == 'slide':
-            seg_logit = self.slide_inference(img, img_meta, rescale)
-        else:
-            seg_logit = self.whole_inference(img, img_meta, rescale)
-        if self.out_channels == 1:
-            output = F.sigmoid(seg_logit)
-        else:
-            output = F.softmax(seg_logit, dim=1)
-        flip = img_meta[0]['flip']
-        if flip:
-            flip_direction = img_meta[0]['flip_direction']
-            assert flip_direction in ['horizontal', 'vertical']
-            if flip_direction == 'horizontal':
-                output = output.flip(dims=(3, ))
-            elif flip_direction == 'vertical':
-                output = output.flip(dims=(2, ))
-
-        return output
+        return self.model.inference(img, img_meta, rescale)
 
     def simple_test(self, img, img_meta, rescale=True):
         """Simple test with single image."""
-        seg_logit = self.inference(img, img_meta, rescale)
-        if self.out_channels == 1:
-            seg_pred = (seg_logit >
-                        self.decode_head.threshold).to(seg_logit).squeeze(1)
-        else:
-            seg_pred = seg_logit.argmax(dim=1)
-        if torch.onnx.is_in_onnx_export():
-            # our inference backend only support 4D output
-            seg_pred = seg_pred.unsqueeze(0)
-            return seg_pred
-        seg_pred = seg_pred.cpu().numpy()
-        # unravel batch dim
-        seg_pred = list(seg_pred)
-        return seg_pred
+
+        return self.model.simple_test(img, img_meta, rescale)
 
     def aug_test(self, imgs, img_metas, rescale=True):
         """Test with augmentations.
@@ -289,19 +460,5 @@ class SFDAEncoderDecoder(BaseSegmentor):
         Only rescale=True is supported.
         """
         # aug_test rescale all imgs back to ori_shape for now
-        assert rescale
-        # to save memory, we get augmented seg logit inplace
-        seg_logit = self.inference(imgs[0], img_metas[0], rescale)
-        for i in range(1, len(imgs)):
-            cur_seg_logit = self.inference(imgs[i], img_metas[i], rescale)
-            seg_logit += cur_seg_logit
-        seg_logit /= len(imgs)
-        if self.out_channels == 1:
-            seg_pred = (seg_logit >
-                        self.decode_head.threshold).to(seg_logit).squeeze(1)
-        else:
-            seg_pred = seg_logit.argmax(dim=1)
-        seg_pred = seg_pred.cpu().numpy()
-        # unravel batch dim
-        seg_pred = list(seg_pred)
-        return seg_pred
+
+        return self.model.aug_test(imgs, img_metas, rescale)
