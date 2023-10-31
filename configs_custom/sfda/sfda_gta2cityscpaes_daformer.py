@@ -8,8 +8,22 @@ _base_ = [
     '../_base_/uda/sfda_model.py',
     '../_base_/schedules/schedule_160k.py'
 ]
+
+
 # Random Seed
-seed = 0
+# seed = 0
+
+from configs_custom._base_.datasets.sfda_gta2cityscapes import *
+
+
+data_ = dict(
+    pseudo_test=dict(
+            type='PseudoCityscapesDataset',
+            data_root='/data_zs/code/source_free_da/mmsegmentation_sfda/data/cityscapes/',
+            img_dir='leftImg8bit/train',
+            ann_dir='gtFine/train',
+            pipeline=test_pipeline)
+)
 
 resume = '/data_zs/code/source_free_da/mmsegmentation_sfda/work_dirs/onlysource_gta_daformer_mitb5_512x512_b4_pmd/best_mIoU_iter_38000.pth'
 model = dict(
@@ -42,7 +56,18 @@ runner = dict(type='IterBasedRunner', max_iters=40000)
 checkpoint_config = dict(by_epoch=False, interval=2000, max_keep_ckpts=3)  #False 40000
 evaluation = dict(interval=2000, metric='mIoU', save_best='mIoU')  #, pre_eval=True
 
-# evaluation = dict(interval=100, metric='mIoU')   #4000
-# Meta Information for Result Analysis
-name = 'sfda_gta_daformer_mitb5_512x512_b4_dtu'
+work_dir = r'/data_zs/code/source_free_da/mmsegmentation_sfda/work_dirs/sfda_gta_daformer_mitb5_512x512_b4_dtu_tcr-iter2000'
+name = 'sfda_gta_daformer_mitb5_512x512_b4_dtu_tcr-iter2000'
+
+custom_hooks = [dict(
+                    type='TCRHook',
+                    data_train=data,
+                    data_pseudo=data_,
+                    topk_candidate=0.5,
+                    update_frequency=2000,
+                    output_dir=work_dir
+                    )]
+
+
+
 

@@ -172,10 +172,21 @@ class WeightEMA(object):
         self.src_params = list(src_params)
         self.alpha = alpha
 
-    def step(self):
-        one_minus_alpha = 1.0 - self.alpha
+    # def step(self):
+    #     one_minus_alpha = 1.0 - self.alpha
+    #     for p, src_p in zip(self.params, self.src_params):
+    #         p.data.mul_(self.alpha)
+    #         p.data.add_(src_p.data * one_minus_alpha)
+
+    def step(self, iter_=None):
+        if iter_ is None:
+            alpha_= self.alpha
+            one_minus_alpha = 1.0 - self.alpha
+        else:
+            alpha_ = min(1 - 1 / (iter_ + 1), self.alpha)
+            one_minus_alpha = 1.0 - alpha_
         for p, src_p in zip(self.params, self.src_params):
-            p.data.mul_(self.alpha)
+            p.data.mul_(alpha_)
             p.data.add_(src_p.data * one_minus_alpha)
 
 @SEGMENTORS.register_module()
@@ -214,9 +225,10 @@ class SFDAEncoderDecoder(BaseSegmentor):
         ema_model = build_segmentor(deepcopy(cfg['model']))
         self.ema_model =get_module(ema_model)
 
+        self.criterion = torch.nn.CrossEntropyLoss(ignore_index=255, reduction='none')
         self.binary_ce = BinaryCrossEntropy(ignore_index=255)
 
-        self.running_conf = torch.zeros(self.model.decode_head.num_classes).cuda() #TODO:确认是否需要加cuda(),或者是否可以把running_conf分布到多卡上
+        self.running_conf = torch.zeros(self.model.decode_head.num_classes) #.to(torch.device('cuda:1')) #.cuda() #TODO:确认是否需要加cuda(),或者是否可以把running_conf分布到多卡上
         self.running_conf.fill_(self.threshold_beta)
         if self.dtu_dynamic:
             self.stu_eval_list = []
@@ -245,6 +257,9 @@ class SFDAEncoderDecoder(BaseSegmentor):
         map of the same size as input."""
         return self.model.encode_decode(img, img_metas)
 
+    @property
+    def num_classes(self):
+        return self.model.decode_head.num_classes
 
 
     def forward_dummy(self, img):
@@ -253,13 +268,13 @@ class SFDAEncoderDecoder(BaseSegmentor):
 
         return seg_logit
 
-    def evel_stu(self, stu_eval_list, dtu_proxy_metric):
+    def evel_stu(self, stu_eval_list, dtu_proxy_metric, device=torch.device('cuda:0')):
         eval_result = []
         # self.eval()
         with torch.no_grad():
             for i, (x, permute_index) in enumerate(stu_eval_list):
                 # print('------------------------i:{},x:{},permute_index:{}'.format(i, x.shape, permute_index))
-                output = self.model.decode_head.forward(self.model.extract_feat(x.cuda()))
+                output = self.model.decode_head.forward(self.model.extract_feat(x.to(device))) #  .cuda()  .to(device)  torch.device('cuda:1')
                 output = resize(input=output, size=x.shape[2:], mode='bilinear', align_corners=self.model.align_corners)
                 output = F.softmax(output, dim=1)
                 if dtu_proxy_metric == 'ENT':
@@ -335,9 +350,11 @@ class SFDAEncoderDecoder(BaseSegmentor):
             dict[str, Tensor]: a dictionary of loss components
         """
         log_vars = {}
+        device = img.device
 
         if self.local_iter == 0:
             self._init_ema_weights()
+            self.running_conf = self.running_conf.to(device)
 
         x = self.model.extract_feat(img)
         target_pred = self.model.decode_head.forward(x)
@@ -393,11 +410,13 @@ class SFDAEncoderDecoder(BaseSegmentor):
         target_losses = dict()
         # print('--------------------------target_pred:{}'.format(target_pred.shape))
         # print('--------------------------psd_label:{}'.format(psd_label.shape))
-        st_loss = self.model.decode_head.losses(target_pred, psd_label.unsqueeze(1).long())
-        # pesudo_p_loss = (st_loss * (-(1 - uc_map_eln)).exp()).mean()  #TODO:删掉是否合理
+        # st_loss = self.model.decode_head.losses(target_pred, psd_label.unsqueeze(1).long())  #调用mmseg内部损失含函数
+        st_loss = self.criterion(target_pred, psd_label.long())
+        pesudo_p_loss = (st_loss * (-(1 - uc_map_eln)).exp()).mean()  #TODO:删掉是否合理
+        target_losses['pesudo_pos.loss'] = pesudo_p_loss
         pesudo_n_loss = self.binary_ce(target_pred.view(b * c, 1, h, w), t_neg_label) * 0.5  # 忽略255，专注于负样本，即t_neg_label[tgt_prob_his <= thr] = 0部分
         target_losses['pesudo_neg.loss'] = pesudo_n_loss
-        target_losses.update(add_prefix(st_loss, 'decode'))
+        # target_losses.update(add_prefix(st_loss, 'decode'))    #调用mmseg内部损失含函数
 
         losses, target_log_vars = self._parse_losses(target_losses)
         log_vars.update(target_log_vars)
@@ -405,12 +424,12 @@ class SFDAEncoderDecoder(BaseSegmentor):
 
         if self.dtu_dynamic:
             if len(self.stu_score_buffer) >= self.dtu_query_start and int(len(self.stu_score_buffer) - self.dtu_query_start) % self.dtu_query_step == 0:
-                all_score = self.evel_stu(self.stu_eval_list, self.dtu_proxy_metric)
+                all_score = self.evel_stu(self.stu_eval_list, self.dtu_proxy_metric, device)
                 compare_res = np.array(all_score) - np.array(self.stu_score_buffer)
                 if np.mean(compare_res > 0) > 0.5 or len(self.stu_score_buffer) > self.dtu_meta_max_update:
                     update_iter = len(self.stu_score_buffer)
 
-                    self.ema_model_optimizer.step()
+                    self.ema_model_optimizer.step()   #self.local_iter
 
 
                     self.res_dict['stu_ori'].append(np.array(self.stu_score_buffer).mean())
@@ -425,7 +444,7 @@ class SFDAEncoderDecoder(BaseSegmentor):
                     self.stu_score_buffer = []
         else:
             if self.local_iter % self.dtu_fix_iteration == 0:
-                self.ema_model_optimizer.step()
+                self.ema_model_optimizer.step()  #self.local_iter
 
         self.local_iter += 1
         return log_vars

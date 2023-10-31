@@ -31,7 +31,7 @@ from mmseg.utils import (collect_env, get_device, get_root_logger,
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a segmentor')
     parser.add_argument('--config', default='/data_zs/code/source_free_da/mmsegmentation_sfda/configs_custom/sfda/sfda_gta2cityscpaes_daformer.py', help='train config file path')
-    parser.add_argument('--work-dir', default='/data_zs/code/source_free_da/mmsegmentation_sfda/work_dirs/sfda_gta_daformer_mitb5_512x512_b4_dtu', help='the dir to save logs and models')
+    parser.add_argument('--work-dir', default=None, help='the dir to save logs and models')
     parser.add_argument(
         '--load-from', help='the checkpoint file to load weights from')
     parser.add_argument(

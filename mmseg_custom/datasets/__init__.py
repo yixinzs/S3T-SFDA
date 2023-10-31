@@ -7,11 +7,12 @@ from .loveda import LOVEDADataset
 from .uda_dataset import UDADataset
 from .gta import GTADataset
 from .sfda_dataset import SFDADataset
-
+from .pseudo_cityscapes import PseudoCityscapesDataset
 __all__ = ['MapillaryDataset',
            'CustomBaseDataset',
            'RSIPACDataset',
            'LOVEDADataset',
            'GTADataset',
            'UDADataset',
-           'SFDADataset']   #, 'CustomBaseDataset', 'RSIPACDataset'
+           'SFDADataset',
+           'PseudoCityscapesDataset']   #, 'CustomBaseDataset', 'RSIPACDataset'
