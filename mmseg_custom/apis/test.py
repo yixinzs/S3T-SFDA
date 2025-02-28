@@ -131,17 +131,17 @@ def single_gpu_test(model,
         if pre_eval:
             # TODO: adapt samples_per_gpu > 1.
             # only samples_per_gpu=1 valid now
-            result = dataset.pre_eval(result, indices=batch_indices) #原精度验证方式
-            results.extend(result)  #原精度验证方式
-            # metric = dataset.pre_eval(result, indices=batch_indices, metric=metric)  #更改精度验证方式
+            # result = dataset.pre_eval(result, indices=batch_indices) #原精度验证方式
+            # results.extend(result)  #原精度验证方式
+            metric = dataset.pre_eval(result, indices=batch_indices, metric=metric)  #更改精度验证方式
         else:
             results.extend(result)
 
         batch_size = len(result)
         for _ in range(batch_size):
             prog_bar.update()
-    # if pre_eval:
-    #     results = metric.get_conf_matrix() #更改精度验证方式
+    if pre_eval:
+        results = metric.get_conf_matrix() #更改精度验证方式
     # print('-----------------------results-----:{}'.format(results))
     return results
 

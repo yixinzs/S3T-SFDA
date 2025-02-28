@@ -30,7 +30,7 @@ from mmseg.utils import (collect_env, get_device, get_root_logger,
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a segmentor')
-    parser.add_argument('--config', default='/data_zs/code/source_free_da/mmsegmentation_sfda/configs_custom/sfda/sfda_gta2cityscpaes_daformer.py', help='train config file path')
+    parser.add_argument('--config', default='/data_zs/code/source_free_da/mmsegmentation_sfda/configs_custom/sfda/st-sfda_loveda_rural2urban_deeplabv2.py', help='train config file path')
     parser.add_argument('--work-dir', default=None, help='the dir to save logs and models')
     parser.add_argument(
         '--load-from', help='the checkpoint file to load weights from')
@@ -208,7 +208,7 @@ def main():
         cfg.model,
         train_cfg=cfg.get('train_cfg'),
         test_cfg=cfg.get('test_cfg'))
-    # model.init_weights()
+    model.init_weights()
 
     # SyncBN is not support for DP
     if not distributed:

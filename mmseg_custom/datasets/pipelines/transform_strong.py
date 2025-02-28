@@ -1,6 +1,6 @@
 import mmcv
 import numpy as np
-import torch
+import pickle
 from mmseg.datasets.builder import PIPELINES
 from mmcv.parallel import DataContainer as DC
 from mmcv.utils import deprecated_api_warning, is_tuple_of
@@ -13,6 +13,8 @@ import pandas as pd
 import random
 import os
 import json
+from copy import deepcopy
+from skimage.measure import label as sklabel
 
 @PIPELINES.register_module()
 class DefaultFormatBundleStrong(object):
@@ -71,10 +73,12 @@ class WeakToStrong(object):
     def __call__(self, results):
 
         img = results['img']
-        gt_semantic_seg = results['gt_semantic_seg']
-        results['img_full'] = img
-        results['gt_semantic_seg_full'] = gt_semantic_seg
-        results['seg_fields'].append('gt_semantic_seg_full')
+        results['img_full'] = img.copy()
+
+        if 'gt_semantic_seg' in results:
+            gt_semantic_seg = results['gt_semantic_seg']
+            results['gt_semantic_seg_full'] = gt_semantic_seg.copy()
+            results['seg_fields'].append('gt_semantic_seg_full')
 
         return results
 
@@ -249,7 +253,7 @@ class RandomCrop(object):
 
         img = results['img']
         crop_bbox = self.get_crop_bbox(img)
-        if self.cat_max_ratio < 1.:
+        if self.cat_max_ratio < 1. and 'gt_semantic_seg' in results:
             # Repeat 10 times
             for _ in range(10):
                 seg_temp = self.crop(results['gt_semantic_seg'], crop_bbox)
@@ -605,3 +609,255 @@ class RandomFlip(object):
 
     def __repr__(self):
         return self.__class__.__name__ + f'(prob={self.prob})'
+
+@PIPELINES.register_module()
+class RandMixPseudo():
+    def __init__(self, psd_root, classes, choice_p):
+        self.psd_root = psd_root
+        self.classes = classes
+        self.choice_p = choice_p
+        self.candidate_name = 'CTR'
+        self.file_p = os.path.join(self.psd_root, self.candidate_name + '.p')
+        if os.path.isfile(self.file_p):
+            self.label_to_file, _ = pickle.load(open(self.file_p, "rb"))
+    def readImage(self, dirname):
+        if dirname.endswith('.png'):
+            image = cv2.imread(dirname, -1)
+        elif dirname.endswith('.tif'):
+            Img = gdal.Open(dirname)
+            image = Img.ReadAsArray(0, 0, Img.RasterXSize, Img.RasterYSize)
+            if len(image.shape) == 3:
+                image = np.rollaxis(image, 0, 3)
+        return image
+
+    def mix(self, in_imgs, image_root, psd_root, classes, choice_p):
+        # in_imgs :  PIL or numpy   (w, h, 3)
+        # classes :  candidate category for copy-paste
+        # choice_p :  sample prob for candidate category
+        # return :
+        #       out_imgs:    (w, h, 3)
+        #       out_labels:  (w, h, 3)
+        in_imgs = np.array(in_imgs)
+        out_imgs = deepcopy(in_imgs)
+        out_lbls = np.ones(in_imgs.shape[:2]) * 255
+        in_w, in_h = in_imgs.shape[:2]
+        # if len(classes) == 0:
+        #     # print('-----------------######-------------------------')
+        #     return out_imgs, out_lbls
+        class_idx = np.random.choice(classes, size=1, p=choice_p)[0]
+        ins_pix_num = 50
+        while True:
+            name = random.sample(self.label_to_file[class_idx], 1)
+            cdd_img_path = os.path.join(image_root, name[0]).replace('_labelTrainIds.png', '.png')   #isprs:.replace('_labelTrainIds.tif', '.tif')
+            # print(f'\n------------------------cdd_img_path:{cdd_img_path}')
+            cdd_label_path = os.path.join(psd_root, self.candidate_name, name[0])
+            # print(f'------------------------------cdd_root:{cdd_label_path}')
+            cdd_img = self.readImage(cdd_img_path) #np.asarray(Image.open(cdd_img_path).convert('RGB'), np.uint8)
+            cdd_lbl = self.readImage(cdd_label_path)  #np.asarray(Image.open(cdd_label_path))
+
+            x1 = random.randint(0, cdd_img.shape[0] - in_h)
+            y1 = random.randint(0, cdd_img.shape[1] - in_w)
+            cdd_img = cdd_img[x1:x1 + in_h, y1:y1 + in_w, :]
+            cdd_lbl = cdd_lbl[x1:x1 + in_h, y1:y1 + in_w]
+
+
+            mask = cdd_lbl == class_idx
+            if np.sum(mask) >= ins_pix_num:
+                break
+        # if self.join_mode == 'direct':
+        #     if self.class_num == 19:
+        #         # 12: rider  17: bike   18: moto-
+        #         if class_idx == 12:
+        #             if 17 in cdd_lbl:
+        #                 mask += cdd_lbl == 17
+        #             if 18 in cdd_lbl:
+        #                 mask += cdd_lbl == 18
+        #         if class_idx == 17 or class_idx == 18:
+        #             mask += cdd_lbl == 12
+        #         # 5: pole  6: light   7: sign
+        #         if class_idx == 5:
+        #             if 6 in cdd_lbl:
+        #                 mask += cdd_lbl == 6
+        #             if 7 in cdd_lbl:
+        #                 mask += cdd_lbl == 7
+        #         if class_idx == 6 or class_idx == 7:
+        #             mask += cdd_lbl == 5
+        #     else:
+        #         # 11: rider  14: bike 15: moto-
+        #         if class_idx == 11:
+        #             if 14 in cdd_lbl:
+        #                 mask += cdd_lbl == 14
+        #             if 15 in cdd_lbl:
+        #                 mask += cdd_lbl == 15
+        #         if class_idx == 14 or class_idx == 15:
+        #             mask += cdd_lbl == 11
+        #         # 5: pole  6: light   7: sign
+        #         if class_idx == 5:
+        #             if 6 in cdd_lbl:
+        #                 mask += cdd_lbl == 6
+        #             if 7 in cdd_lbl:
+        #                 mask += cdd_lbl == 7
+        #         if class_idx == 6 or class_idx == 7:
+        #             mask += cdd_lbl == 5
+
+        masknp = mask.astype(int)
+        seg, forenum = sklabel(masknp, background=5, return_num=True, connectivity=2)  #background=0
+        filled_mask = np.zeros(in_imgs.shape[:2])
+        filled_boxes = []
+        for i in range(forenum):
+            instance_id = i + 1
+            if np.sum(seg == instance_id) < 20:
+                continue
+            ins_mask = (seg == instance_id).astype(np.uint8)
+            cont, hierarchy = cv2.findContours(ins_mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+            cont = list(cont)   #后加，查是否为opencv版本问题
+            cont.sort(key=lambda c: cv2.contourArea(c), reverse=True)
+            x, y, w, h = cv2.boundingRect(cont[0])
+            #### rescale instance
+            # randscale = 0.5 + np.random.rand() * 1.5
+            randscale = 1.0 + np.random.rand() * 1.5
+            resized_crop_ins = cv2.resize(cdd_img[y:y + h, x:x + w], None, fx=randscale, fy=randscale,
+                                          interpolation=cv2.INTER_NEAREST)  #cv2.INTER_NEAREST  #此处似乎有误,应为cv2.INTER_LINEAR
+            resized_crop_mask = cv2.resize(ins_mask[y:y + h, x:x + w], None, fx=randscale, fy=randscale,
+                                           interpolation=cv2.INTER_NEAREST)
+            resized_crop_mask_cdd = cv2.resize(cdd_lbl[y:y + h, x:x + w], None, fx=randscale, fy=randscale,
+                                               interpolation=cv2.INTER_NEAREST)
+            new_w, new_h = resized_crop_ins.shape[:2]
+            if in_w <= new_w or in_h <= new_h:
+                continue
+            ##### cal new axis
+            cnt = 100
+            while cnt > 1:
+                ##### 判断共现类，生成paste位置，穿插到单实例中
+                # if class_idx not in resized_crop_mask_cdd and len(filled_boxes) > 0 and random.random() < 0.5:
+                if class_idx not in resized_crop_mask_cdd[resized_crop_mask > 0] and len(filled_boxes) > 0:  #这段判断语句应该可以忽略   此句不可以忽略，可能resized_crop_mask > 0的部分是背景部分
+                    rand_box = random.sample(filled_boxes, 1)[0]
+                    x1 = random.randint(rand_box[0], rand_box[1] - 1)
+                    y1 = random.randint(rand_box[2], rand_box[3] - 1)
+                    if x1 + new_w < in_w - 1 and y1 + new_h < in_h - 1:
+                        break
+                x1 = random.randint(0, in_w - new_w - 1)
+                y1 = random.randint(0, in_h - new_h - 1)
+                if filled_mask[x1, y1] == 0 and filled_mask[x1 + new_w, y1 + new_h] == 0:
+                    break
+                cnt -= 1
+            ##### paste
+            if cnt > 1:
+                out_imgs[x1:x1 + new_w, y1:y1 + new_h][resized_crop_mask > 0] = resized_crop_ins[resized_crop_mask > 0]
+                out_lbls[x1:x1 + new_w, y1:y1 + new_h][resized_crop_mask > 0] = resized_crop_mask_cdd[resized_crop_mask > 0]
+                filled_mask[x1:x1 + new_w, y1:y1 + new_h] = 1
+                ##### 将单实例的存入filled_boxes
+                if len(np.unique(resized_crop_mask_cdd[resized_crop_mask > 0])) == 1 and class_idx in \
+                        resized_crop_mask_cdd[resized_crop_mask > 0]:
+                    filled_boxes.append([x1, x1 + new_w, y1, y1 + new_h])
+
+        return out_imgs, out_lbls
+
+    def __call__(self, results):
+        img = results['img']
+        img_root = results['img_prefix']
+        mix_image, mix_label = self.mix(results['img'], img_root, self.psd_root, self.classes, self.choice_p)
+
+        results['img'] = mix_image
+        results['mix_label'] = mix_label
+
+        return results
+
+@PIPELINES.register_module()
+class RandomROIBbox(object):
+    """Random crop the image & seg.
+
+    Args:
+        crop_size (tuple): Expected size after cropping, (h, w).
+        cat_max_ratio (float): The maximum ratio that single category could
+            occupy.
+    """
+
+    def __init__(self, crop_size, scale, roi_num=10, ignore_index=255):
+        assert crop_size[0] > 0 and crop_size[1] > 0
+        self.crop_size = crop_size
+        self.scale = scale
+        self.roi_num = roi_num
+        self.ignore_index = ignore_index
+
+    def get_crop_bbox(self, img):
+        """Randomly get a crop bounding box."""
+        margin_h = max(img.shape[0] - self.crop_size[0], 0)
+        margin_w = max(img.shape[1] - self.crop_size[1], 0)
+        offset_h = np.random.randint(0, margin_h + 1)
+        offset_w = np.random.randint(0, margin_w + 1)
+        crop_y1, crop_y2 = offset_h, offset_h + self.crop_size[0]
+        crop_x1, crop_x2 = offset_w, offset_w + self.crop_size[1]
+
+        return crop_y1, crop_y2, crop_x1, crop_x2
+
+    # def get_crop_bbox_list(self, img, count):
+    #     roi_list = []
+    #     for it in range(count):
+    #         margin_h = max(img.shape[0] - self.crop_size[0], 0)
+    #         margin_w = max(img.shape[1] - self.crop_size[1], 0)
+    #         offset_h = np.random.randint(0, margin_h + 1)
+    #         offset_w = np.random.randint(0, margin_w + 1)
+    #         crop_y1, crop_y2 = offset_h, offset_h + self.crop_size[0]
+    #         crop_x1, crop_x2 = offset_w, offset_w + self.crop_size[1]
+    #         roi_list.append(np.array([crop_x1, crop_y1,  crop_x2, crop_y2]))
+    #     roi_list = np.stack(roi_list, axis=0)
+    #     return roi_list
+
+    def get_crop_bbox_list(self, img, count):
+        roi_list = []
+        ratio = np.random.random_sample() * (max(self.scale) - min(self.scale)) + min(self.scale)
+        scale = int(img.shape[0] * ratio), int(img.shape[1] * ratio)
+        for it in range(count):
+            margin_h = max(img.shape[0] - scale[0], 0)
+            margin_w = max(img.shape[1] - scale[1], 0)
+            offset_h = np.random.randint(0, margin_h + 1)
+            offset_w = np.random.randint(0, margin_w + 1)
+            crop_y1, crop_y2 = offset_h, offset_h + scale[0]
+            crop_x1, crop_x2 = offset_w, offset_w + scale[1]
+            roi_list.append(np.array([crop_x1, crop_y1,  crop_x2, crop_y2]))
+        roi_list = np.stack(roi_list, axis=0)
+        return roi_list
+
+    def crop(self, img, crop_bbox):
+        """Crop from ``img``"""
+        crop_y1, crop_y2, crop_x1, crop_x2 = crop_bbox
+        img = img[crop_y1:crop_y2, crop_x1:crop_x2, ...]
+        return img
+
+    def __call__(self, results):
+        """Call function to randomly crop images, semantic segmentation maps.
+
+        Args:
+            results (dict): Result dict from loading pipeline.
+
+        Returns:
+            dict: Randomly cropped results, 'img_shape' key in result dict is
+                updated according to crop size.
+        """
+
+        img = results['img']
+        # crop_bbox = self.get_crop_bbox(img)
+        roi_bbox_list = self.get_crop_bbox_list(img, self.roi_num)
+
+        # crop the image
+        # img = self.crop(img, crop_bbox)
+        # img_shape = img.shape
+        # results['img'] = img
+        # results['img_shape'] = img_shape
+
+        # if 'crop_bbox' not in results:
+        #     results['crop_bbox'] = crop_bbox
+        # elif 'img_full' in results:   #直接else
+        #     results['crop_bbox_full'] = results['crop_bbox']
+        #     results['crop_bbox'] = crop_bbox
+
+        results['crop_bbox_list'] = roi_bbox_list
+        # # crop semantic seg
+        # for key in results.get('seg_fields', []):
+        #     results[key] = self.crop(results[key], crop_bbox)
+
+        return results
+
+    def __repr__(self):
+        return self.__class__.__name__ + f'(crop_size={self.crop_size})'

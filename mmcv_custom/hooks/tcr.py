@@ -44,13 +44,19 @@ class TCRHook(Hook):
         os.makedirs(self.save_folder_O, exist_ok=True)
 
     def before_run(self, runner):
+        intersection_meter = AverageMeter()
+        union_meter = AverageMeter()
+        target_meter = AverageMeter()
+
         model = runner.model
+        model.eval()
         if is_module_wrapper(model):
             model = model.module
         device = next(model.parameters()).device
         data_test = self.data_presudo_test['pseudo_test']
-        data_test['pseudo'] = False
+        data_test['pseudo'] = False  #False
         data_test['test_mode'] = True
+        # data_test['pseudo_dir'] = self.save_folder_O  #如果真实目标域无真值标签，则离线生成伪标签至此路径，同时置data_test['pseudo'] = True，此处加载真值是为了与run_candidate代码统一，可无需加载真真
         dataset = build_dataset(data_test)
         data_loader = build_dataloader(dataset,
                                              1,
@@ -59,16 +65,21 @@ class TCRHook(Hook):
                                              dist=False,
                                              shuffle=False)
 
-        prog_bar = mmcv.ProgressBar(len(dataset))
+        prog_bar = mmcv.ProgressBar(len(data_loader))   #len(dataset)
         loader_indices = data_loader.batch_sampler
 
         name_list = []
-        predicted_label = np.zeros((len(dataset), 256, 512))
-        predicted_prob = np.zeros((len(dataset), 256, 512))
+        predicted_label = np.zeros((len(dataset), 256, 256))     #若img_size为512，则为(128, 128),若img_size为1024，则(256, 256)
+        predicted_prob = np.zeros((len(dataset), 256, 256))
 
         for batch_indices, data in zip(loader_indices, data_loader):
             with torch.no_grad():
                 img_tensor = data['img'][0]
+
+                y = self.get_gt(dataset, batch_indices)
+                y = torch.from_numpy(y).to(device)
+                size = y.shape[-2:]
+
                 img_metas = data['img_metas'][0].data[0]
                 name = img_metas[0]['ori_filename']
                 if next(model.parameters()).is_cuda:
@@ -80,10 +91,30 @@ class TCRHook(Hook):
                 probs = self.inference(model, **data)
                 pred = probs.max(1)[1]
                 prob = probs.max(1)[0]
-                predicted_prob[batch_indices] = F.interpolate(prob.unsqueeze(0).float(), size=[256, 512]).cpu().numpy().squeeze()
-                predicted_label[batch_indices] = F.interpolate(pred.unsqueeze(0).float(), size=[256, 512]).cpu().numpy().squeeze()
+
+                intersection, union, target = self.intersectionAndUnionGPU(pred.clone(), y, model.num_classes, device=device)  #, device
+                predicted_prob[batch_indices] = F.interpolate(prob.unsqueeze(0).float(), size=[256, 256]).cpu().numpy().squeeze()
+                predicted_label[batch_indices] = F.interpolate(pred.unsqueeze(0).float(), size=[256, 256]).cpu().numpy().squeeze()
+
+                name = name.replace('.png', '_labelTrainIds.png')    #isprs:'.tif', '_labelTrainIds.tif'   #loveda:'.png', '_labelTrainIds.png'
                 name_list.append(name)
+
+                intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
+                intersection_meter.update(intersection), union_meter.update(union), target_meter.update(target)
                 prog_bar.update()
+
+        iou_class = intersection_meter.sum / (union_meter.sum + 1e-10)
+        accuracy_class = intersection_meter.sum / (target_meter.sum + 1e-10)
+        mIoU = np.mean(iou_class)
+        mAcc = np.mean(accuracy_class)
+        allAcc = sum(intersection_meter.sum) / (sum(target_meter.sum) + 1e-10)
+
+        runner.logger.info('Val result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}.'.format(mIoU, mAcc, allAcc))
+        runner.logger.info(
+            '################################################################################################################')
+        for i in range(model.num_classes):
+            runner.logger.info(
+                'Class_{} {} Result: iou/accuracy {:.4f}/{:.4f}.'.format(i, i, iou_class[i], accuracy_class[i]))
 
         thres = []
         for i in range(model.num_classes):
@@ -106,7 +137,7 @@ class TCRHook(Hook):
             out_file = osp.join(self.save_folder_O, name)
             os.makedirs(os.path.dirname(out_file), exist_ok=True)
             # print(f'--------------out_file:{out_file}')
-            cv2.imwrite(out_file.replace('_leftImg8bit.png', '_gtFine_labelTrainIds.png'), mask)
+            cv2.imwrite(out_file, mask)  #.replace('_leftImg8bit.png', '_gtFine_labelTrainIds.png')
 
             prob = predicted_prob[index]
             for i in range(model.num_classes):
@@ -117,7 +148,7 @@ class TCRHook(Hook):
             out_file = osp.join(self.save_folder, name)
             os.makedirs(os.path.dirname(out_file), exist_ok=True)
             # print(f'--------------out_file_:{out_file}')
-            cv2.imwrite(out_file.replace('_leftImg8bit.png', '_gtFine_labelTrainIds.png'), mask)
+            cv2.imwrite(out_file, mask)   #.replace('_leftImg8bit.png', '_gtFine_labelTrainIds.png')
         runner.logger.info('run_candidate over !!!')
 
         out_file_ctr = osp.join(self.output_dir, 'CTR.p')
@@ -126,7 +157,7 @@ class TCRHook(Hook):
         self.gen_lb_info(self.save_folder, out_file_ctr_o, model.num_classes)
 
         data_train = self.data_train['train']
-        data_train['max_iters'] = 40000
+        data_train['max_iters'] = 25000
         data_train['tcr_file'] = out_file_ctr
         data_train['tcr_o_file'] = out_file_ctr_o
         dataset_train = build_dataset(data_train)
@@ -138,6 +169,7 @@ class TCRHook(Hook):
                                        dist=False,
                                        shuffle=True)
 
+        model.train()
         # runner.run([data_loader_train], [('train', 1)])
         runner.iter_loaders = [IterLoader(data_loader_train)]
 
@@ -151,7 +183,12 @@ class TCRHook(Hook):
 
 
     def run_candidate(self, runner, init_candidate=False):
+        intersection_meter = AverageMeter()
+        union_meter = AverageMeter()
+        target_meter = AverageMeter()
+
         model = runner.model
+        model.eval()
         if is_module_wrapper(model):
             model = model.module
         device = next(model.parameters()).device
@@ -168,11 +205,11 @@ class TCRHook(Hook):
                                        dist=False,
                                        shuffle=False)
 
-        prog_bar = mmcv.ProgressBar(len(dataset))
+        prog_bar = mmcv.ProgressBar(len(data_loader))   #len(dataset)
         loader_indices = data_loader.batch_sampler
 
         name_list = []
-        predicted_label = np.zeros((len(dataset), 512, 1024))
+        predicted_label = np.zeros((len(dataset), 512, 512))      ##若img_size为512，则为(256, 256),若img_size为1024，则(512, 512)
         single_iou_list = np.zeros((len(dataset), model.num_classes))
 
         for batch_indices, data in zip(loader_indices, data_loader):
@@ -194,13 +231,28 @@ class TCRHook(Hook):
                 probs = self.inference(model, **data)
                 pred = probs.max(1)[1]
                 # print(f'-----------@@@@@-----------------pred:{pred.shape},y:{y.shape}')
-                intersection, union, target = self.intersectionAndUnionGPU(pred.clone(), y, model.num_classes)
+                intersection, union, target = self.intersectionAndUnionGPU(pred.clone(), y, model.num_classes, device=device)
                 single_iou = intersection / (union + 1e-8)
                 single_iou_list[batch_indices] = single_iou.cpu().numpy()
-                predicted_label[batch_indices] = F.interpolate(pred.unsqueeze(0).float(),
-                                                               size=[xx // 2 for xx in size]).cpu().numpy().squeeze()
+                predicted_label[batch_indices] = F.interpolate(pred.unsqueeze(0).float(),size=[xx // 2 for xx in size]).cpu().numpy().squeeze()
+
+                name = name.replace('.png', '_labelTrainIds.png')    #isprs:'.tif', '_labelTrainIds.tif'   #loveda:'.png', '_labelTrainIds.png'
                 name_list.append(name)
+
+                intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
+                intersection_meter.update(intersection), union_meter.update(union), target_meter.update(target)
                 prog_bar.update()
+
+        iou_class = intersection_meter.sum / (union_meter.sum + 1e-10)
+        accuracy_class = intersection_meter.sum / (target_meter.sum + 1e-10)
+        mIoU = np.mean(iou_class)
+        mAcc = np.mean(accuracy_class)
+        allAcc = sum(intersection_meter.sum) / (sum(target_meter.sum) + 1e-10)
+
+        runner.logger.info('Val result: mIoU/mAcc/allAcc {:.4f}/{:.4f}/{:.4f}.'.format(mIoU, mAcc, allAcc))
+        runner.logger.info('################################################################################################################')
+        for i in range(model.num_classes):
+            runner.logger.info('Class_{} {} Result: iou/accuracy {:.4f}/{:.4f}.'.format(i, i, iou_class[i], accuracy_class[i]))
 
         thres = []
         for i in range(model.num_classes):
@@ -222,7 +274,7 @@ class TCRHook(Hook):
 
             out_file = osp.join(self.save_folder_O, name)
             os.makedirs(os.path.dirname(out_file), exist_ok=True)
-            cv2.imwrite(out_file.replace('_leftImg8bit.png', '_gtFine_labelTrainIds.png'), mask)
+            cv2.imwrite(out_file, mask)  #.replace('_leftImg8bit.png', '_gtFine_labelTrainIds.png')
 
             ReL = single_iou_list[index]
             for i in range(model.num_classes):  ## masking
@@ -233,7 +285,7 @@ class TCRHook(Hook):
 
             out_file = osp.join(self.save_folder, name)
             os.makedirs(os.path.dirname(out_file), exist_ok=True)
-            cv2.imwrite(out_file.replace('_leftImg8bit.png', '_gtFine_labelTrainIds.png'), mask)
+            cv2.imwrite(out_file, mask)  #.replace('_leftImg8bit.png', '_gtFine_labelTrainIds.png')
         runner.logger.info('run_candidate over !!!')
 
         out_file_ctr = osp.join(self.output_dir, 'CTR.p')
@@ -242,7 +294,7 @@ class TCRHook(Hook):
         self.gen_lb_info(self.save_folder, out_file_ctr_o, model.num_classes)
 
         data_train = self.data_train['train']
-        data_train['max_iters'] = 40000
+        data_train['max_iters'] = 25000
         data_train['tcr_file'] = out_file_ctr
         data_train['tcr_o_file'] = out_file_ctr_o
         dataset_train = build_dataset(data_train)
@@ -254,9 +306,10 @@ class TCRHook(Hook):
                                              dist=False,
                                              shuffle=True)
         # runner.run([data_loader_train], [('train', 1)])
+        model.train()
         runner.iter_loaders = [IterLoader(data_loader_train)]
 
-    def intersectionAndUnionGPU(self, output, target, K, ignore_index=255):
+    def intersectionAndUnionGPU(self, output, target, K, ignore_index=255, device=None):
         # 'K' classes, output and target sizes are N or N * L or N * H * W, each value in range 0 to K - 1.
         assert (output.dim() in [1, 2, 3])
         assert output.shape == target.shape
@@ -269,7 +322,7 @@ class TCRHook(Hook):
         area_output = torch.histc(output.float().cpu(), bins=K, min=0, max=K - 1)
         area_target = torch.histc(target.float().cpu(), bins=K, min=0, max=K - 1)
         area_union = area_output + area_target - area_intersection
-        return area_intersection, area_union, area_target
+        return area_intersection.to(device), area_union.to(device), area_target.to(device)  #.to(device)
 
     # @auto_fp16(apply_to=('img',))
     def inference(self, model, img, img_metas, rescale=True, **kwargs):
@@ -351,7 +404,7 @@ class TCRHook(Hook):
 
         return np.stack(sep_map_list, axis=0)
 
-    def gen_lb_info(self, img_path, out_file, num_classes, nprocs=1, suffix='.png'):
+    def gen_lb_info(self, img_path, out_file, num_classes, nprocs=1, suffix='_labelTrainIds.png'):  #isprs:.tif   loveda:.png
 
         labfiles = []
         file_client = mmcv.FileClient.infer_client(dict(backend='disk'))
@@ -362,27 +415,7 @@ class TCRHook(Hook):
                 recursive=True):
             labfiles.append(img)
 
-        id_to_trainid = {
-            0: 0,
-            1: 1,
-            2: 2,
-            3: 3,
-            4: 4,
-            5: 5,
-            6: 6,
-            7: 7,
-            8: 8,
-            9: 9,
-            10: 10,
-            11: 11,
-            12: 12,
-            13: 13,
-            14: 14,
-            15: 15,
-            16: 16,
-            17: 17,
-            18: 18
-        }
+        id_to_trainid = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6} #isprs:{0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5}
 
         label_to_file = [[] for _ in range(len(id_to_trainid.keys()))]
         file_to_label = {e: [] for e in labfiles}
@@ -400,8 +433,7 @@ class TCRHook(Hook):
                     if 255 == lab: continue
                     if np.sum(label_ == lab) < 50: continue  # 像素个数小于50
                     label_to_file[lab].append(labfile)
-                    file_to_label[labfile].append(
-                        lab)
+                    file_to_label[labfile].append(lab)
 
             return label_to_file, file_to_label
 
@@ -430,3 +462,21 @@ class TCRHook(Hook):
 
         with open(out_file, 'wb') as f:
             pickle.dump((label_to_file, file_to_label), f)
+
+
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count

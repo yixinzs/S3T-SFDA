@@ -2,11 +2,11 @@
 from .formatting import DefaultFormatBundle, ToMask
 from .transform import MapillaryHack, PadShortSide, AlbumentationAug, LabelEncode, ClassMixFDA, CutReplace, FDA, DynamicNormalize, RandomNormalize  #, SETR_Resize
 from .loading import LoadImageFromFileCustom, LoadAnnotationsCustom
-from .transform_strong import WeakToStrong, DefaultFormatBundleStrong, Normalize, Resize, RandomCrop, RandomFlip
+from .transform_strong import WeakToStrong, DefaultFormatBundleStrong, Normalize, Resize, RandomCrop, RandomFlip, RandomROIBbox, RandMixPseudo
 
 __all__ = [
     'DefaultFormatBundle', 'ToMask', 'PadShortSide',   #, 'SETR_Resize'
     'MapillaryHack', 'LoadImageFromFileCustom', 'LoadAnnotationsCustom',
     'AlbumentationAug', 'LabelEncode', 'ClassMixFDA', 'CutReplace', 'FDA', 'DynamicNormalize', 'RandomNormalize',
-    'WeakToStrong', 'DefaultFormatBundleStrong', 'Normalize', 'Resize', 'RandomCrop', 'RandomFlip'
+    'WeakToStrong', 'DefaultFormatBundleStrong', 'Normalize', 'Resize', 'RandomCrop', 'RandomFlip', 'RandomROIBbox', 'RandMixPseudo',
 ]

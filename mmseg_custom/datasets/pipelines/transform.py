@@ -460,19 +460,35 @@ class AlbumentationAug(object):
         ]
 
         self.tranforms = [
-            A.HorizontalFlip(p=0.3),
-            A.VerticalFlip(p=0.5),
-            A.ShiftScaleRotate(shift_limit=0.125, scale_limit=0.4, rotate_limit=90, p=0.3),
-            A.RandomBrightnessContrast(p=0.5),  # ------------1
-            A.RGBShift(r_shift_limit=20, g_shift_limit=20, b_shift_limit=20, p=0.3),  # -------2
-            A.OneOf(
-                [
-                    A.CLAHE(clip_limit=4.0, tile_grid_size=(8, 8), always_apply=False, p=0.5),  # @色调变换1
-                    A.HueSaturationValue(hue_shift_limit=20, sat_shift_limit=30, val_shift_limit=20, p=0.5),  # #@色调变换1
-                    A.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1, p=0.5),  # @色调变换1
-                ],
-                p=0.6,
-            ),  # -------------3
+            # A.HorizontalFlip(p=0.5),
+            # A.VerticalFlip(p=0.5),
+            # A.ShiftScaleRotate(shift_limit=0.125, scale_limit=0.4, rotate_limit=90, p=0.3),
+            A.RandomBrightnessContrast(brightness_limit=(0.1, 0.3), contrast_limit=(0.1, 0.3), p=0.2),  # ------------1
+            A.HueSaturationValue(hue_shift_limit=20, sat_shift_limit=30, val_shift_limit=20, p=0.2),
+            # A.RGBShift(r_shift_limit=20, g_shift_limit=20, b_shift_limit=20, p=0.3),  # -------2
+            # A.OneOf(
+            #     [
+            #         A.CLAHE(clip_limit=4.0, tile_grid_size=(8, 8), always_apply=False, p=0.5),  # @色调变换1
+            #         A.HueSaturationValue(hue_shift_limit=20, sat_shift_limit=30, val_shift_limit=20, p=0.5),  # #@色调变换1
+            #         A.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1, p=0.5),  # @色调变换1
+            #     ],
+            #     p=0.6,
+            # ),  # -------------3
+
+        # self.tranforms = [
+        #     A.HorizontalFlip(p=0.3),
+        #     A.VerticalFlip(p=0.5),
+        #     A.ShiftScaleRotate(shift_limit=0.125, scale_limit=0.4, rotate_limit=90, p=0.3),
+        #     A.RandomBrightnessContrast(p=0.5),  # ------------1
+        #     A.RGBShift(r_shift_limit=20, g_shift_limit=20, b_shift_limit=20, p=0.3),  # -------2
+        #     A.OneOf(
+        #         [
+        #             A.CLAHE(clip_limit=4.0, tile_grid_size=(8, 8), always_apply=False, p=0.5),  # @色调变换1
+        #             A.HueSaturationValue(hue_shift_limit=20, sat_shift_limit=30, val_shift_limit=20, p=0.5),  # #@色调变换1
+        #             A.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1, p=0.5),  # @色调变换1
+        #         ],
+        #         p=0.6,
+        #     ),  # -------------3
             # A.GaussNoise(var_limit=(0.0, 15.0), mean=0, p=0.2),  # @噪声变换  #-----------4
             # A.OneOf(
             #     [
@@ -534,7 +550,7 @@ class AlbumentationAug(object):
 
     def TrainAugmentation(self, p=1):
 
-        return A.Compose(self.tranforms_v2, p=p)
+        return A.Compose(self.tranforms, p=p)   #self.tranforms_v2
 
     def __call__(self, results):
 

@@ -13,6 +13,7 @@ import mmcv
 import numpy as np
 from mmcv.utils import print_log
 from prettytable import PrettyTable
+import pandas as pd
 from torch.utils.data import Dataset
 
 from mmseg.core import eval_metrics, intersect_and_union, pre_eval_to_metrics
@@ -510,6 +511,25 @@ class CustomBaseDataset(Dataset):
                 eval_results['IoU'] = ret_metrics['IoU']
                 eval_results['FWIoU'] = ret_metrics['FWIoU']
 
+            '''write as csv'''
+            metric_dict = {}
+            for key, value in ret_metrics_summary.items():
+                metric_dict[key] = [value]
+
+            class_names = ret_metrics_class.pop('Class', None)
+            for key, value in ret_metrics_class.items():
+                metric_dict.update({
+                    key + '.' + str(name): [value[idx]]
+                    for idx, name in enumerate(class_names)
+                })
+
+            df = pd.DataFrame(metric_dict)
+            out_file = r'/data_zs/output/loveDA_uda/rural2urban/st-sfda_roi-prop_loveda_rural2urban_deeplab_resnet_512x512_b4_dtu_lr6e-5_total_augv2_dt-st/metric.csv' #r'/irsa/data_zs/output/tmp_debug/onlysource_potsdamIRRG_deeplabv2_resnet101_512x512_lr5e-4_b4_vaihingen-train-val_pmd/metric.csv' #r'/data_zs/code/source_free_da/mmsegmentation_sfda/work_dirs/onlysource_dfc22_convnext_mitb2_512x512_b4_pmd-albu_addauxdecode_train-val-Clermont-Ferrand_3004_1231/metric.csv'
+            if not osp.exists(out_file):
+                df.to_csv(out_file, index=False)
+            else:
+                df.to_csv(out_file, mode='a', index=False, header=False)
+
             return eval_results
 
         if isinstance(metric, str):
@@ -589,24 +609,34 @@ class CustomBaseDataset(Dataset):
                 for idx, name in enumerate(class_names)
             })
         # print('--------------------------------eval_results:{}'.format(eval_results))
-        return eval_results
 
+
+        return eval_results
 
     def decode_segmap(self, mask, class_index=None):
 
         assert len(mask.shape) == 2, "the len of mask unexpect"
-        #assert cfg.DATASET.NUM_CLASSES == len(cfg.DATASET.CLASS_INDEX[0]), "the value of NUM_CLASSES do not equal the len of CLASS_INDEX"
+        # assert cfg.DATASET.NUM_CLASSES == len(cfg.DATASET.CLASS_INDEX[0]), "the value of NUM_CLASSES do not equal the len of CLASS_INDEX"
         height, width = mask.shape
 
-        decode_mask = np.zeros((height, width), dtype=np.uint16)
+        if isinstance(class_index[0], int):
+            decode_mask = np.zeros((height, width), dtype=np.uint16)
 
-        for pixel_value, class_index in class_index.items():  # range(self.config.num_classes):
-            decode_mask[mask == pixel_value] = class_index
+            for pixel_value, class_index in class_index.items():  # range(self.config.num_classes):
+                decode_mask[mask == pixel_value] = class_index
+        else:
+            decode_mask = np.zeros((height, width, 3), dtype=np.uint8)
+            for pixel, color in class_index.items():
+                if isinstance(color, list) and len(color) == 3:
+                    decode_mask[np.where(mask == int(pixel))] = color
+                else:
+                    print("unexpected format of color_map in the config json:{}".format(color))
 
-        return decode_mask #.astype(dtype=np.uint32)
+        return decode_mask.astype(np.uint8)  #[:, :, ::-1]  #.astype(dtype=np.uint32)
 
 
-    def show_result(self, pred, out_file):
-
-        mask = self.decode_segmap(pred, self.label_map)
-        cv2.imwrite(out_file.replace('.tif', '.png'), mask)
+    def show_result(self, pred, out_file, label_map=None):
+        if label_map is None:
+            label_map = self.label_map
+        mask = self.decode_segmap(pred, label_map)   #[:, :, ::-1]
+        cv2.imwrite(out_file, mask)  # .replace('.tif', '.png')

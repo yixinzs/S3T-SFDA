@@ -1,4 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import os.path
 from copy import deepcopy
 import numpy as np
 import pandas as pd
@@ -205,6 +206,8 @@ class SFDAEncoderDecoder(BaseSegmentor):
         #         'both backbone and segmentor set pretrained weight'
         #     backbone.pretrained = pretrained
         self.local_iter = 0
+        self.resume_file = cfg['resume_file']
+
         self.dtu_dynamic = cfg['dtu_dynamic']
         self.dtu_query_step = cfg['query_step']
         self.dtu_query_start = cfg['query_start']
@@ -215,15 +218,15 @@ class SFDAEncoderDecoder(BaseSegmentor):
         self.topk_candidate = cfg['topk_candidate']
         self.update_frequency = cfg['update_frequency']
         self.threshold_beta = cfg['threshold_beta']
-
+        self.work_dir = cfg['work_dir']
 
         model = build_segmentor(deepcopy(cfg['model']))
         self.model = get_module(model)
         # print('-------------resume_file:{}'.format(cfg['resume_file']))
-        load_checkpoint(self.model, cfg['resume_file'])
 
         ema_model = build_segmentor(deepcopy(cfg['model']))
         self.ema_model =get_module(ema_model)
+        self.ema_model.eval()
 
         self.criterion = torch.nn.CrossEntropyLoss(ignore_index=255, reduction='none')
         self.binary_ce = BinaryCrossEntropy(ignore_index=255)
@@ -235,7 +238,10 @@ class SFDAEncoderDecoder(BaseSegmentor):
             self.stu_score_buffer = []
             self.res_dict = {'stu_ori': [], 'stu_now': [], 'update_iter': []}
 
-        self.ema_model_optimizer = WeightEMA(list(self.ema_model.parameters()), list(self.model.parameters()), self.dtu_ema_weight)
+        self.ema_model_optimizer = WeightEMA(list(self.ema_model.decode_head.parameters()), list(self.model.decode_head.parameters()), self.dtu_ema_weight)  #list(self.ema_model.parameters()), list(self.model.parameters()) backbone  ema_model.decode_head   list(self.ema_model.backbone.parameters()), list(self.model.backbone.parameters())
+
+    def init_weights(self):
+        load_checkpoint(self.model, self.resume_file)
 
     def _init_ema_weights(self):
         for param in self.ema_model.parameters():
@@ -270,7 +276,7 @@ class SFDAEncoderDecoder(BaseSegmentor):
 
     def evel_stu(self, stu_eval_list, dtu_proxy_metric, device=torch.device('cuda:0')):
         eval_result = []
-        # self.eval()
+        self.model.eval()
         with torch.no_grad():
             for i, (x, permute_index) in enumerate(stu_eval_list):
                 # print('------------------------i:{},x:{},permute_index:{}'.format(i, x.shape, permute_index))
@@ -290,7 +296,7 @@ class SFDAEncoderDecoder(BaseSegmentor):
                     pred1 = F.normalize(pred1[pred1_rand[:select_point]])
                     pred1_en = entropy(torch.matmul(pred1, pred1.t()) * 20)
                     eval_result.append(pred1_en.item())
-        # self.train()
+        self.model.train()
         return eval_result
 
     def train_step(self, data_batch, optimizer, **kwargs):
@@ -333,7 +339,8 @@ class SFDAEncoderDecoder(BaseSegmentor):
                       img,
                       img_metas,
                       gt_semantic_seg,
-                      img_full=None):
+                      img_full=None,
+                      mix_label=None):
         """Forward function for training.
 
         Args:
@@ -404,7 +411,7 @@ class SFDAEncoderDecoder(BaseSegmentor):
             t_neg_label[ema_target_prob <= thr] = 0
 
             # label mix
-            # psd_label = psd_label * (mix_label == 255) + mix_label * ((mix_label != 255))
+            psd_label = psd_label * (mix_label == 255) + mix_label * ((mix_label != 255))
             uc_map_eln = torch.ones_like(psd_label).float()
 
         target_losses = dict()
@@ -414,7 +421,7 @@ class SFDAEncoderDecoder(BaseSegmentor):
         st_loss = self.criterion(target_pred, psd_label.long())
         pesudo_p_loss = (st_loss * (-(1 - uc_map_eln)).exp()).mean()  #TODO:删掉是否合理
         target_losses['pesudo_pos.loss'] = pesudo_p_loss
-        pesudo_n_loss = self.binary_ce(target_pred.view(b * c, 1, h, w), t_neg_label) * 0.5  # 忽略255，专注于负样本，即t_neg_label[tgt_prob_his <= thr] = 0部分
+        pesudo_n_loss = self.binary_ce(target_pred.view(b * c, 1, h, w), t_neg_label) * 1  # 忽略255，专注于负样本，即t_neg_label[tgt_prob_his <= thr] = 0部分
         target_losses['pesudo_neg.loss'] = pesudo_n_loss
         # target_losses.update(add_prefix(st_loss, 'decode'))    #调用mmseg内部损失含函数
 
@@ -437,7 +444,7 @@ class SFDAEncoderDecoder(BaseSegmentor):
                     self.res_dict['update_iter'].append(update_iter)
 
                     df = pd.DataFrame(self.res_dict)
-                    df.to_csv('dyIter_FN.csv')
+                    df.to_csv(os.path.join(self.work_dir, 'dyIter_FN.csv'))
 
                     ## reset
                     self.stu_eval_list = []

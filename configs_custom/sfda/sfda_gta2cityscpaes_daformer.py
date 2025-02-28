@@ -25,7 +25,7 @@ data_ = dict(
             pipeline=test_pipeline)
 )
 
-resume = '/data_zs/code/source_free_da/mmsegmentation_sfda/work_dirs/onlysource_gta_daformer_mitb5_512x512_b4_pmd/best_mIoU_iter_38000.pth'
+resume = '/data_zs/code/source_free_da/mmsegmentation_sfda/work_dirs/onlysource_gta_daformer_mitb5_512x512_b4_pmd/best_mIoU_iter_38000.pth' #'/data_zs/code/source_free_da/mmsegmentation_sfda/work_dirs/onlysource_gta_daformer_mitb5_512x512_b4_pmd/best_mIoU_iter_38000.pth'
 model = dict(
     resume_file=resume,
     )
@@ -56,17 +56,17 @@ runner = dict(type='IterBasedRunner', max_iters=40000)
 checkpoint_config = dict(by_epoch=False, interval=2000, max_keep_ckpts=3)  #False 40000
 evaluation = dict(interval=2000, metric='mIoU', save_best='mIoU')  #, pre_eval=True
 
-work_dir = r'/data_zs/code/source_free_da/mmsegmentation_sfda/work_dirs/sfda_gta_daformer_mitb5_512x512_b4_dtu_tcr-iter2000'
-name = 'sfda_gta_daformer_mitb5_512x512_b4_dtu_tcr-iter2000'
+work_dir = r'/data_zs/code/source_free_da/mmsegmentation_sfda/work_dirs/sfda_g2c_daformer_mitb5_512x512_b4_dtu_tcr-iter3000_neg-loass-w1_3004_debug'
+name = 'sfda_g2c_daformer_mitb5_512x512_b4_dtu_tcr-iter3000_neg-loass-w1_3004_debug'
 
-custom_hooks = [dict(
-                    type='TCRHook',
-                    data_train=data,
-                    data_pseudo=data_,
-                    topk_candidate=0.5,
-                    update_frequency=2000,
-                    output_dir=work_dir
-                    )]
+# custom_hooks = [dict(
+#                     type='TCRHook',
+#                     data_train=data,
+#                     data_pseudo=data_,
+#                     topk_candidate=0.5,
+#                     update_frequency=3000,
+#                     output_dir=work_dir
+#                     )]
 
 
 

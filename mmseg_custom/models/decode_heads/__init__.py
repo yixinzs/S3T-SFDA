@@ -7,7 +7,7 @@ from .daformer_head import DAFormerHead
 from .dacs_decode_head import DACSBaseDecodeHead
 from .hrda_head import HRDAHead
 from .dlv2_head import DLV2Head
-
+# from .unet_head import UnetHead
 __all__ = ['GNUPerHead',
            'ContrastUPerHead',
            'ContrastFCNHead',
@@ -16,4 +16,6 @@ __all__ = ['GNUPerHead',
            'DAFormerHead',
            'DACSBaseDecodeHead',
            'HRDAHead',
-           'DLV2Head']
+           'DLV2Head',
+           # 'UnetHead'
+           ]

@@ -160,7 +160,7 @@ class SegmentationMetric(object):
 
     def reset(self):
         """Resets the internal evaluation result to initial state."""
-        self.confusion_matrix = torch.zeros((self.nclass, self.nclass), dtype=torch.float64).to('cuda:1')#.cuda() #torch.zeros((self.nclass, self.nclass)).cuda()
+        self.confusion_matrix = torch.zeros((self.nclass, self.nclass), dtype=torch.float64).cuda()  #.to('cuda:1')#.cuda() #torch.zeros((self.nclass, self.nclass)).cuda()
 
 
 def batch_pix_accuracy(output, target):
