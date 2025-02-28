@@ -1,1 +1,1 @@
-A Multilevel-Guided Curriculum Domain Adaptation Approach to Semantic Segmentation for High-Resolution Remote Sensing Images
+Self-Supervised Spatial-Temporal Consistency for Source-Free Domain Adaptive Segmentation in Remote Sensing Images
